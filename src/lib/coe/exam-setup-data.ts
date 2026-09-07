@@ -1,92 +1,126 @@
-export type ExamStatus =
-  | "Paper Pending"
-  | "Exam Paper Received"
-  | "Room Assigned"
-  | "Ready for Launch";
+/** View models for the Controller of Examination portal. */
+
+import type { StatusTone } from "@/components/status-badge";
+import type {
+  ExamDTO,
+  ExamPaperStatusDTO,
+  ExamStatusDTO,
+  FinalGradeDTO,
+  FinalGradeStatusDTO,
+  GraduationRecordStatusDTO,
+  TranscriptStatusDTO,
+} from "@/lib/api/types";
+import { avatarColor, formatDate, fullName, initialsOf, timeRange } from "@/lib/format";
+
+// ─── Exams ──────────────────────────────────────────────────────────────────
 
 export interface ExamRow {
   id: string;
-  subject: string;
+  classId: string;
   code: string;
-  department: string;
+  subject: string;
+  examType: string;
   date: string;
   time: string;
-  status: ExamStatus;
-  room?: string;
-  invigilator?: string;
+  status: ExamStatusDTO;
+  semester: string;
 }
 
-export const initialExams: ExamRow[] = [
-  {
-    id: "e1",
-    subject: "Advanced Algorithms",
-    code: "CS402",
-    department: "Dept. of CS",
-    date: "Oct 12, 2023",
-    time: "09:00 AM - 12:00 PM",
-    status: "Exam Paper Received",
-  },
-  {
-    id: "e2",
-    subject: "Modern World History",
-    code: "HIS201",
-    department: "Dept. of History",
-    date: "Oct 14, 2023",
-    time: "02:00 PM - 05:00 PM",
-    status: "Paper Pending",
-  },
-  {
-    id: "e3",
-    subject: "Quantum Physics II",
-    code: "PHY505",
-    department: "Dept. of Physics",
-    date: "Oct 15, 2023",
-    time: "09:00 AM - 12:00 PM",
-    status: "Room Assigned",
-    room: "Hall B-402",
-  },
-  {
-    id: "e4",
-    subject: "Microeconomics",
-    code: "ECO101",
-    department: "Dept. of Economics",
-    date: "Oct 16, 2023",
-    time: "09:00 AM - 12:00 PM",
-    status: "Ready for Launch",
-    room: "Hall A-101",
-    invigilator: "Dr. Patel",
-  },
+export function fromApiExam(dto: ExamDTO): ExamRow {
+  return {
+    id: dto.id,
+    classId: dto.classId,
+    code: dto.class.course.code,
+    subject: dto.class.course.name,
+    examType: dto.examType === "MIDTERM" ? "Midterm" : "Final",
+    date: formatDate(dto.examDate),
+    time: timeRange(dto.startTime, dto.endTime),
+    status: dto.status,
+    semester: dto.semester.name,
+  };
+}
+
+export const examStatusTone: Record<ExamStatusDTO, StatusTone> = {
+  CREATED: "amber",
+  SCHEDULED: "sky",
+  PUBLISHED: "green",
+  COMPLETED: "rose",
+};
+
+export const EXAM_STATUS_FLOW: ExamStatusDTO[] = [
+  "CREATED",
+  "SCHEDULED",
+  "PUBLISHED",
+  "COMPLETED",
 ];
 
-export const ROOM_OPTIONS = ["Hall A-101", "Hall B-402", "Lab C-201", "Auditorium"];
-export const INVIGILATOR_OPTIONS = [
-  "Dr. Patel",
-  "Prof. Diaz",
-  "Dr. Kim",
-  "Ms. Alvarez",
-];
+export const EXAM_TYPE_OPTIONS = [
+  { value: "MIDTERM", label: "Midterm" },
+  { value: "FINAL", label: "Final" },
+] as const;
 
-export interface ActivityItem {
+export const examPaperTone: Record<ExamPaperStatusDTO, StatusTone> = {
+  DRAFT: "amber",
+  SUBMITTED: "sky",
+  RECEIVED: "green",
+};
+
+// ─── Grading oversight ──────────────────────────────────────────────────────
+
+export interface GradeRow {
   id: string;
-  barColorClassName: string;
-  title: string;
-  description: string;
-  meta: string;
+  studentId: string;
+  studentNumber: string;
+  name: string;
+  initials: string;
+  avatarColorClassName: string;
+  coursework: number;
+  exam: number;
+  finalScore: number;
+  letterGrade: string;
+  gpaPoints: number;
+  status: FinalGradeStatusDTO;
 }
 
-export const initialActivity: ActivityItem[] = [
-  {
-    id: "a1",
-    barColorClassName: "bg-emerald-500",
-    title: "Schedule Updated",
-    description: "Room B-402 assigned to CS101",
-    meta: "2 mins ago",
-  },
-  {
-    id: "a2",
-    barColorClassName: "bg-rose-500",
-    title: "New Paper Received",
-    description: "Intro to Physics (PHY101) by Prof. Miller",
-    meta: "1 hour ago",
-  },
-];
+export function fromApiFinalGrade(dto: FinalGradeDTO): GradeRow {
+  return {
+    id: dto.id,
+    studentId: dto.studentId,
+    studentNumber: dto.student.studentNumber,
+    name: fullName(dto.student.firstName, dto.student.lastName),
+    initials: initialsOf(dto.student.firstName, dto.student.lastName),
+    avatarColorClassName: avatarColor(dto.studentId),
+    coursework: dto.courseworkScore,
+    exam: dto.examScore,
+    finalScore: dto.finalScore,
+    letterGrade: dto.letterGrade,
+    gpaPoints: dto.gpaPoints,
+    status: dto.status,
+  };
+}
+
+export const finalGradeTone: Record<FinalGradeStatusDTO, StatusTone> = {
+  PENDING: "amber",
+  RECEIVED: "sky",
+  APPROVED: "rose",
+  PUBLISHED: "green",
+};
+
+// ─── Transcripts & graduation ───────────────────────────────────────────────
+
+export const transcriptTone: Record<TranscriptStatusDTO, StatusTone> = {
+  REQUESTED: "amber",
+  GENERATED: "green",
+};
+
+export const graduationTone: Record<GraduationRecordStatusDTO, StatusTone> = {
+  ELIGIBLE: "sky",
+  GRADUATED: "green",
+  NOT_ELIGIBLE: "rose",
+};
+
+export const GRADUATION_STATUS_OPTIONS = [
+  { value: "ELIGIBLE", label: "Eligible" },
+  { value: "GRADUATED", label: "Graduated" },
+  { value: "NOT_ELIGIBLE", label: "Not Eligible" },
+] as const;

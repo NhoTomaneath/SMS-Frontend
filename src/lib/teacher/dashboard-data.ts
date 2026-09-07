@@ -1,120 +1,155 @@
+/** View models for the Teacher portal. */
+
+import type { StatusTone } from "@/components/status-badge";
+import type {
+  AttendanceStatusDTO,
+  CourseworkGradeStatusDTO,
+  ExamPaperStatusDTO,
+  TeacherClassDTO,
+  TeacherScheduleEntryDTO,
+} from "@/lib/api/types";
+import { avatarColor, clockTime, initialsOf, fullName } from "@/lib/format";
+
+// ─── Today's schedule ───────────────────────────────────────────────────────
+
+export type ScheduleState = "COMPLETED" | "IN PROGRESS" | "UPCOMING";
+
 export interface ScheduleItem {
   id: string;
+  classId: string;
   startTime: string;
   endTime: string;
   title: string;
+  courseCode: string;
   location: string;
   studentCount: number;
-  status: "COMPLETED" | "IN PROGRESS" | "UPCOMING";
+  status: ScheduleState;
 }
 
-export const initialTodaysSchedule: ScheduleItem[] = [
-  {
-    id: "s1",
-    startTime: "09:00 AM",
-    endTime: "10:30 AM",
-    title: "Advanced Thermodynamics",
-    location: "Room 402B",
-    studentCount: 42,
-    status: "COMPLETED",
-  },
-  {
-    id: "s2",
-    startTime: "11:00 AM",
-    endTime: "12:30 PM",
-    title: "Fluid Mechanics Workshop",
-    location: "Engineering Lab 1",
-    studentCount: 25,
-    status: "IN PROGRESS",
-  },
-  {
-    id: "s3",
-    startTime: "02:00 PM",
-    endTime: "03:30 PM",
-    title: "Introduction to Robotics",
-    location: "Auditorium Hall",
-    studentCount: 120,
-    status: "UPCOMING",
-  },
-];
+export const scheduleTone: Record<ScheduleState, StatusTone> = {
+  COMPLETED: "green",
+  "IN PROGRESS": "amber",
+  UPCOMING: "sky",
+};
 
-export interface AttendanceStudent {
-  id: string;
-  name: string;
-  present: boolean;
+/**
+ * Places a slot relative to the wall clock. The backend returns the day's
+ * entries but not which one is running, so the comparison happens here against
+ * the viewer's local time.
+ */
+function stateFor(start: string, end: string, now: Date): ScheduleState {
+  const hhmm = `${String(now.getHours()).padStart(2, "0")}:${String(
+    now.getMinutes(),
+  ).padStart(2, "0")}`;
+  if (hhmm >= end) return "COMPLETED";
+  if (hhmm >= start) return "IN PROGRESS";
+  return "UPCOMING";
 }
 
-export const fluidMechanicsRoster: AttendanceStudent[] = [
-  { id: "a1", name: "Marcus Holloway", present: true },
-  { id: "a2", name: "Priya Nair", present: true },
-  { id: "a3", name: "Daniel Kim", present: true },
-  { id: "a4", name: "Sarah Jenkins", present: true },
-  { id: "a5", name: "Tomas Alvarez", present: true },
-  { id: "a6", name: "Grace Okafor", present: true },
-];
+export function fromApiScheduleEntry(
+  dto: TeacherScheduleEntryDTO,
+  now = new Date(),
+): ScheduleItem {
+  const startTime = clockTime(dto.startTime);
+  const endTime = clockTime(dto.endTime);
+  return {
+    id: dto.id,
+    classId: dto.classId,
+    startTime,
+    endTime,
+    title: dto.class.course.name,
+    courseCode: dto.class.course.code,
+    location: dto.room ?? dto.class.room ?? "Room TBC",
+    studentCount: dto.class._count.registrations,
+    status: stateFor(startTime, endTime, now),
+  };
+}
+
+// ─── Assigned courses ───────────────────────────────────────────────────────
 
 export interface AssignedCourse {
   id: string;
   code: string;
   name: string;
-  meta: string;
-  iconColorClassName: string;
+  semester: string;
+  room: string;
+  capacity: number;
+  enrolled: number;
+  status: TeacherClassDTO["status"];
+  accentClassName: string;
 }
 
-export const assignedCourses: AssignedCourse[] = [
-  {
-    id: "c1",
-    code: "MECH-401",
-    name: "Advanced Thermodynamics",
-    meta: "Semester VII • Section A",
-    iconColorClassName: "bg-rose-50 text-rose-700",
-  },
-  {
-    id: "c2",
-    code: "MECH-305",
-    name: "Fluid Mechanics",
-    meta: "Semester V • Section B",
-    iconColorClassName: "bg-sky-50 text-sky-700",
-  },
-  {
-    id: "c3",
-    code: "ROB-202",
-    name: "Introduction to Robotics",
-    meta: "Semester III • Section C",
-    iconColorClassName: "bg-amber-50 text-amber-700",
-  },
+const COURSE_ACCENTS = [
+  "border-rose-600 bg-rose-50",
+  "border-sky-600 bg-sky-50",
+  "border-amber-500 bg-amber-50",
+  "border-emerald-600 bg-emerald-50",
+  "border-violet-600 bg-violet-50",
 ];
 
-export interface SubmissionAlert {
+export function fromApiTeacherClass(dto: TeacherClassDTO, index: number): AssignedCourse {
+  return {
+    id: dto.id,
+    code: dto.course.code,
+    name: dto.course.name,
+    semester: dto.semester.name,
+    room: dto.room ?? "Room TBC",
+    capacity: dto.capacity,
+    enrolled: dto._count.registrations,
+    status: dto.status,
+    accentClassName: COURSE_ACCENTS[index % COURSE_ACCENTS.length],
+  };
+}
+
+// ─── Roster rows shared by attendance and grading ───────────────────────────
+
+export interface RosterRow {
   id: string;
-  kind: "late" | "grading" | "attendance";
-  title: string;
-  description: string;
-  meta: string;
+  studentId: string;
+  studentNumber: string;
+  name: string;
+  initials: string;
+  avatarColorClassName: string;
 }
 
-export const initialSubmissionAlerts: SubmissionAlert[] = [
-  {
-    id: "al1",
-    kind: "late",
-    title: "Late Submission: Lab Report 4",
-    description: "Student: Marcus Holloway • MECH-305",
-    meta: "2h ago",
-  },
-  {
-    id: "al2",
-    kind: "grading",
-    title: "Grading Alert: Final Project Drafts",
-    description:
-      "15 new submissions ready for grading in Introduction to Robotics.",
-    meta: "5h ago",
-  },
-  {
-    id: "al3",
-    kind: "attendance",
-    title: "Attendance Threshold Reached",
-    description:
-      "Sarah Jenkins has dropped below 75% attendance in Thermodynamics.",
-    meta: "Yesterday",
-  },
+export function rosterRowOf(student: {
+  id: string;
+  studentNumber: string;
+  firstName: string;
+  lastName: string;
+}): Omit<RosterRow, "id"> {
+  return {
+    studentId: student.id,
+    studentNumber: student.studentNumber,
+    name: fullName(student.firstName, student.lastName),
+    initials: initialsOf(student.firstName, student.lastName),
+    avatarColorClassName: avatarColor(student.id),
+  };
+}
+
+// ─── Status tones ───────────────────────────────────────────────────────────
+
+export const attendanceTone: Record<AttendanceStatusDTO, StatusTone> = {
+  PRESENT: "green",
+  LATE: "amber",
+  ABSENT: "rose",
+  EXCUSED: "sky",
+};
+
+export const ATTENDANCE_OPTIONS: AttendanceStatusDTO[] = [
+  "PRESENT",
+  "LATE",
+  "ABSENT",
+  "EXCUSED",
 ];
+
+export const courseworkTone: Record<CourseworkGradeStatusDTO, StatusTone> = {
+  DRAFT: "amber",
+  SUBMITTED: "green",
+};
+
+export const examPaperTone: Record<ExamPaperStatusDTO, StatusTone> = {
+  DRAFT: "amber",
+  SUBMITTED: "sky",
+  RECEIVED: "green",
+};

@@ -2,103 +2,162 @@
 
 import Link from "next/link";
 import { useMemo, useRef, useState } from "react";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { IconStatCard } from "@/components/icon-stat-card";
 import { PageHeader } from "@/components/page-header";
-import { StatusBadge, type StatusTone } from "@/components/status-badge";
+import { StatusBadge } from "@/components/status-badge";
+import { LoadingRow, ErrorRow, EmptyRow } from "@/components/query-states";
 import {
   CheckCircleIcon,
   ClipboardIcon,
   FileTextIcon,
   FilterIcon,
   GraduationCapIcon,
-  HistoryIcon,
-  MoreVerticalIcon,
   SearchIcon,
   ShieldCheckIcon,
-  SortIcon,
   UploadCloudIcon,
   UserPlusIcon,
   UsersIcon,
   XIcon,
 } from "@/components/icons";
+import { apiFetch, ApiRequestError } from "@/lib/api/client";
+import { useApiQuery } from "@/lib/api/hooks";
+import type {
+  DepartmentDTO,
+  StudentDTO,
+  StudentImportResultDTO,
+  StudentStatusDTO,
+  StudentSummaryDTO,
+} from "@/lib/api/types";
 import {
-  recentDirectoryChanges,
-  students,
-  type StudentRecord,
+  STUDENT_STATUS_OPTIONS,
+  fromApiStudent,
+  studentStatusTone,
 } from "@/lib/student-affairs/students";
+import { downloadCsv, percentOf } from "@/lib/format";
+import { useDebounced } from "@/lib/use-debounced";
 
-const ACCEPTED_IMPORT_TYPES = [
-  "application/vnd.ms-excel",
-  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-  "text/csv",
-];
+const SAO_KEY = ["student-affairs"] as const;
+const STUDENTS_KEY = [...SAO_KEY, "students"] as const;
+const SUMMARY_KEY = [...SAO_KEY, "students", "summary"] as const;
+const DEPARTMENTS_KEY = ["lookups", "departments"] as const;
 
-const statusTone: Record<StudentRecord["status"], StatusTone> = {
-  Enrolled: "green",
-  Pending: "amber",
-  Withdrawn: "rose",
-};
+const PAGE_SIZE = 10;
 
-function initialsOf(name: string) {
-  return name
-    .split(" ")
-    .map((part) => part[0])
-    .slice(0, 2)
-    .join("")
-    .toUpperCase();
+function errorMessage(err: unknown, fallback: string): string {
+  if (err instanceof ApiRequestError) {
+    const firstFieldError = err.errors ? Object.values(err.errors).flat()[0] : null;
+    return firstFieldError ?? err.message;
+  }
+  return fallback;
 }
 
 export default function StudentAffairsDashboard() {
-  const [query, setQuery] = useState("");
+  const queryClient = useQueryClient();
+
+  const [search, setSearch] = useState("");
+  const [page, setPage] = useState(1);
+  const [statusFilter, setStatusFilter] = useState<"ALL" | StudentStatusDTO>("ALL");
+  const [departmentFilter, setDepartmentFilter] = useState("ALL");
 
   const [showBulkImportModal, setShowBulkImportModal] = useState(false);
   const [importFile, setImportFile] = useState<File | null>(null);
   const [isDraggingImport, setIsDraggingImport] = useState(false);
   const [importError, setImportError] = useState<string | null>(null);
   const importInputRef = useRef<HTMLInputElement>(null);
+  const [toast, setToast] = useState<string | null>(null);
 
-  const [showAllChangesModal, setShowAllChangesModal] = useState(false);
-  const [savedToast, setSavedToast] = useState<string | null>(null);
+  // Debounced so typing does not fire a request per keystroke.
+  const debouncedSearch = useDebounced(search, 300);
 
-  const filteredStudents = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    if (!q) return students;
-    return students.filter(
-      (s) =>
-        s.name.toLowerCase().includes(q) ||
-        s.studentId.toLowerCase().includes(q) ||
-        s.department.toLowerCase().includes(q),
-    );
-  }, [query]);
-
-  function openBulkImportModal() {
-    setImportFile(null);
-    setImportError(null);
-    setShowBulkImportModal(true);
+  function showToast(message: string) {
+    setToast(message);
+    window.setTimeout(() => setToast(null), 5000);
   }
+
+  // ── Queries ───────────────────────────────────────────────────────────────
+
+  const summaryQuery = useApiQuery<StudentSummaryDTO>(
+    SUMMARY_KEY,
+    "/student-affairs/students/summary",
+  );
+
+  const departmentsQuery = useApiQuery<DepartmentDTO[]>(
+    DEPARTMENTS_KEY,
+    "/student-affairs/departments",
+  );
+
+  const studentsQuery = useApiQuery<StudentDTO[]>(
+    [...STUDENTS_KEY, { page, debouncedSearch, statusFilter, departmentFilter }],
+    "/student-affairs/students",
+    {
+      query: {
+        page,
+        limit: PAGE_SIZE,
+        search: debouncedSearch || undefined,
+        status: statusFilter === "ALL" ? undefined : statusFilter,
+        departmentId: departmentFilter === "ALL" ? undefined : departmentFilter,
+      },
+      placeholderData: (prev) => prev,
+    },
+  );
+
+  const summary = summaryQuery.data?.data;
+  const departments = departmentsQuery.data?.data ?? [];
+  const students = useMemo(
+    () => (studentsQuery.data?.data ?? []).map(fromApiStudent),
+    [studentsQuery.data],
+  );
+
+  const total = studentsQuery.data?.pagination?.total ?? 0;
+  const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE));
+
+  const enrolled = summary?.byStatus.ENROLLED ?? 0;
+  const pending = summary?.byStatus.PENDING ?? 0;
+  const linkedRate = percentOf(enrolled, summary?.total ?? 0);
+
+  // ── Bulk import ───────────────────────────────────────────────────────────
+
+  const importMutation = useMutation({
+    mutationFn: async (file: File) => {
+      const csv = await file.text();
+      return apiFetch<StudentImportResultDTO>("/student-affairs/students/import", {
+        method: "POST",
+        body: { csv },
+      });
+    },
+    onSuccess: async (res) => {
+      await queryClient.invalidateQueries({ queryKey: SAO_KEY });
+      const { createdCount, failedCount, errors } = res.data;
+      setShowBulkImportModal(false);
+      setImportFile(null);
+      setImportError(null);
+      showToast(
+        failedCount === 0
+          ? `Imported ${createdCount} student${createdCount === 1 ? "" : "s"}.`
+          : `Imported ${createdCount}, skipped ${failedCount} — first error: ${errors[0]?.message ?? "unknown"}`,
+      );
+    },
+    onError: (err) => setImportError(errorMessage(err, "Import failed.")),
+  });
 
   function selectImportFile(file: File | undefined | null) {
     if (!file) return;
-    const isAcceptedType =
-      ACCEPTED_IMPORT_TYPES.includes(file.type) ||
-      /\.(xlsx|xls|csv)$/i.test(file.name);
-    if (!isAcceptedType) {
-      setImportError("Please upload an Excel (.xlsx, .xls) or CSV file.");
+    // The import endpoint takes CSV text; spreadsheets would need a parser we
+    // do not run client-side.
+    if (!/\.csv$/i.test(file.name) && file.type !== "text/csv") {
+      setImportError("Please upload a .csv file.");
       return;
     }
     setImportError(null);
     setImportFile(file);
   }
 
-  function handleSaveImport() {
-    if (!importFile) {
-      setImportError("Please select a file to import.");
-      return;
-    }
-    setShowBulkImportModal(false);
-    setSavedToast(`"${importFile.name}" has been saved.`);
-    setImportFile(null);
-    window.setTimeout(() => setSavedToast(null), 4000);
+  function resetToFirstPage<T>(setter: (value: T) => void) {
+    return (value: T) => {
+      setPage(1);
+      setter(value);
+    };
   }
 
   return (
@@ -110,7 +169,11 @@ export default function StudentAffairsDashboard() {
           <>
             <button
               type="button"
-              onClick={openBulkImportModal}
+              onClick={() => {
+                setImportFile(null);
+                setImportError(null);
+                setShowBulkImportModal(true);
+              }}
               className="flex items-center gap-2 rounded-lg border border-stone-300 px-5 py-2.5 text-sm font-semibold text-stone-600 hover:bg-stone-50"
             >
               <UploadCloudIcon className="h-4 w-4" />
@@ -131,26 +194,27 @@ export default function StudentAffairsDashboard() {
         <IconStatCard
           icon={UsersIcon}
           label="Total Students"
-          value="12,842"
-          trend="↗ +2.4%"
+          value={summaryQuery.isLoading ? "—" : (summary?.total ?? 0).toLocaleString()}
         />
         <IconStatCard
           icon={GraduationCapIcon}
           iconBgClassName="bg-sky-50 text-sky-600"
           label="Academic Year"
-          value="2023-24"
+          value={summary?.currentAcademicYear?.yearLabel ?? "—"}
         />
         <IconStatCard
           icon={ShieldCheckIcon}
-          label="Verified Records"
-          value="98.2%"
+          label="Enrolled"
+          value={summaryQuery.isLoading ? "—" : enrolled.toLocaleString()}
+          trend={`${linkedRate}% of records`}
         />
         <IconStatCard
           icon={ClipboardIcon}
           label="Pending Approvals"
-          value="14"
-          trend="8 Pending"
-          trendTone="warning"
+          value={summaryQuery.isLoading ? "—" : pending.toLocaleString()}
+          {...(pending > 0
+            ? { trend: `${pending} awaiting review`, trendTone: "warning" as const }
+            : {})}
         />
       </div>
 
@@ -160,32 +224,71 @@ export default function StudentAffairsDashboard() {
             <SearchIcon className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-stone-400" />
             <input
               type="text"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search by name, ID or department..."
+              value={search}
+              onChange={(e) => {
+                setPage(1);
+                setSearch(e.target.value);
+              }}
+              placeholder="Search by name, student number or email..."
               className="w-full rounded-lg border border-stone-200 py-2.5 pl-10 pr-4 text-sm outline-none focus:border-rose-300 focus:ring-2 focus:ring-rose-100"
             />
           </div>
+
+          <div className="relative">
+            <select
+              aria-label="Filter by status"
+              value={statusFilter}
+              onChange={(e) =>
+                resetToFirstPage(setStatusFilter)(e.target.value as "ALL" | StudentStatusDTO)
+              }
+              className="appearance-none rounded-lg border border-stone-300 bg-white py-2.5 pl-9 pr-8 text-sm font-semibold text-stone-600 outline-none focus:border-rose-400"
+            >
+              <option value="ALL">All statuses</option>
+              {STUDENT_STATUS_OPTIONS.map((o) => (
+                <option key={o.value} value={o.value}>
+                  {o.label}
+                </option>
+              ))}
+            </select>
+            <FilterIcon className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-stone-400" />
+          </div>
+
+          <select
+            aria-label="Filter by department"
+            value={departmentFilter}
+            onChange={(e) => resetToFirstPage(setDepartmentFilter)(e.target.value)}
+            disabled={departmentsQuery.isLoading}
+            className="rounded-lg border border-stone-300 bg-white px-4 py-2.5 text-sm font-semibold text-stone-600 outline-none focus:border-rose-400 disabled:bg-stone-50"
+          >
+            <option value="ALL">All departments</option>
+            {departments.map((d) => (
+              <option key={d.id} value={d.id}>
+                {d.name}
+              </option>
+            ))}
+          </select>
+
           <button
             type="button"
-            className="flex items-center gap-2 rounded-lg border border-stone-300 px-4 py-2.5 text-sm font-semibold text-stone-600 hover:bg-stone-50"
+            onClick={() =>
+              downloadCsv(
+                "students.csv",
+                ["Name", "Student Number", "Email", "Department", "Status", "Enrolled"],
+                students.map((s) => [
+                  s.name,
+                  s.studentNumber,
+                  s.email,
+                  s.department,
+                  s.statusLabel,
+                  s.enrolledOn,
+                ]),
+              )
+            }
+            disabled={students.length === 0}
+            className="flex items-center gap-2 rounded-lg border border-stone-300 px-4 py-2.5 text-sm font-semibold text-stone-600 hover:bg-stone-50 disabled:text-stone-300"
           >
-            <FilterIcon className="h-4 w-4" />
-            Filter
-          </button>
-          <button
-            type="button"
-            className="flex items-center gap-2 rounded-lg border border-stone-300 px-4 py-2.5 text-sm font-semibold text-stone-600 hover:bg-stone-50"
-          >
-            <SortIcon className="h-4 w-4" />
-            Sort
-          </button>
-          <button
-            type="button"
-            aria-label="More options"
-            className="rounded-lg border border-stone-300 p-2.5 text-stone-500 hover:bg-stone-50"
-          >
-            <MoreVerticalIcon className="h-4 w-4" />
+            <FileTextIcon className="h-4 w-4" />
+            Export
           </button>
         </div>
 
@@ -194,63 +297,63 @@ export default function StudentAffairsDashboard() {
             <thead>
               <tr className="text-xs font-bold uppercase tracking-wide text-stone-400">
                 <th className="px-5 py-3">Student Name</th>
-                <th className="px-5 py-3">Student ID</th>
+                <th className="px-5 py-3">Student Number</th>
                 <th className="px-5 py-3">Department</th>
-                <th className="px-5 py-3">Year</th>
+                <th className="px-5 py-3">Enrolled</th>
                 <th className="px-5 py-3">Status</th>
-                <th className="px-5 py-3 text-right">Actions</th>
+                <th className="px-5 py-3 text-right">Account</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-stone-100">
-              {filteredStudents.map((student) => (
-                <tr key={student.id}>
-                  <td className="px-5 py-4">
-                    <div className="flex items-center gap-3">
-                      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-rose-100 text-sm font-bold text-rose-700">
-                        {initialsOf(student.name)}
-                      </span>
-                      <div>
-                        <p className="font-semibold text-stone-800">
-                          {student.name}
-                        </p>
-                        <p className="text-xs text-stone-400">
-                          {student.email}
-                        </p>
+              {studentsQuery.isLoading && <LoadingRow colSpan={6} />}
+              {studentsQuery.isError && (
+                <ErrorRow
+                  colSpan={6}
+                  message={studentsQuery.error.message}
+                  onRetry={() => studentsQuery.refetch()}
+                />
+              )}
+              {!studentsQuery.isLoading &&
+                !studentsQuery.isError &&
+                students.map((student) => (
+                  <tr key={student.id}>
+                    <td className="px-5 py-4">
+                      <div className="flex items-center gap-3">
+                        <span
+                          className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-sm font-bold ${student.avatarColorClassName}`}
+                        >
+                          {student.initials}
+                        </span>
+                        <div>
+                          <p className="font-semibold text-stone-800">{student.name}</p>
+                          <p className="text-xs text-stone-400">{student.email}</p>
+                        </div>
                       </div>
-                    </div>
-                  </td>
-                  <td className="px-5 py-4 font-mono text-stone-600">
-                    {student.studentId}
-                  </td>
-                  <td className="px-5 py-4 text-stone-600">
-                    {student.department}
-                  </td>
-                  <td className="px-5 py-4 text-stone-600">{student.year}</td>
-                  <td className="px-5 py-4">
-                    <StatusBadge
-                      label={student.status}
-                      tone={statusTone[student.status]}
-                    />
-                  </td>
-                  <td className="px-5 py-4 text-right">
-                    <button
-                      type="button"
-                      className="text-sm font-semibold text-rose-700 hover:underline"
-                    >
-                      View Profile
-                    </button>
-                  </td>
-                </tr>
-              ))}
-              {filteredStudents.length === 0 && (
-                <tr>
-                  <td
-                    colSpan={6}
-                    className="px-5 py-10 text-center text-sm text-stone-400"
-                  >
-                    No students match your search.
-                  </td>
-                </tr>
+                    </td>
+                    <td className="px-5 py-4 font-mono text-stone-600">
+                      {student.studentNumber}
+                    </td>
+                    <td className="px-5 py-4 text-stone-600">{student.department}</td>
+                    <td className="px-5 py-4 text-stone-600">{student.enrolledOn}</td>
+                    <td className="px-5 py-4">
+                      <StatusBadge
+                        label={student.statusLabel}
+                        tone={studentStatusTone[student.status]}
+                      />
+                    </td>
+                    <td className="px-5 py-4 text-right">
+                      {student.hasAccount ? (
+                        <span className="text-xs font-semibold text-emerald-700">
+                          Linked
+                        </span>
+                      ) : (
+                        <span className="text-xs text-stone-400">No account</span>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              {!studentsQuery.isLoading && !studentsQuery.isError && students.length === 0 && (
+                <EmptyRow colSpan={6} label="No students match these filters." />
               )}
             </tbody>
           </table>
@@ -258,44 +361,22 @@ export default function StudentAffairsDashboard() {
 
         <div className="flex flex-wrap items-center justify-between gap-4 border-t border-stone-200 px-5 py-4 text-sm">
           <p className="text-stone-500">
-            Showing 1 to {filteredStudents.length} of 1,248 entries
+            Page {page} of {pageCount} · {total.toLocaleString()} students
           </p>
           <div className="flex items-center gap-1.5">
             <button
               type="button"
-              disabled
-              className="rounded-lg border border-stone-200 px-3 py-1.5 text-stone-400"
+              disabled={page <= 1}
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
+              className="rounded-lg border border-stone-200 px-3 py-1.5 text-stone-600 hover:bg-stone-50 disabled:text-stone-300"
             >
               Previous
             </button>
             <button
               type="button"
-              className="rounded-lg bg-rose-800 px-3 py-1.5 font-semibold text-white"
-            >
-              1
-            </button>
-            <button
-              type="button"
-              className="rounded-lg px-3 py-1.5 text-stone-600 hover:bg-stone-50"
-            >
-              2
-            </button>
-            <button
-              type="button"
-              className="rounded-lg px-3 py-1.5 text-stone-600 hover:bg-stone-50"
-            >
-              3
-            </button>
-            <span className="px-1 text-stone-400">...</span>
-            <button
-              type="button"
-              className="rounded-lg px-3 py-1.5 text-stone-600 hover:bg-stone-50"
-            >
-              125
-            </button>
-            <button
-              type="button"
-              className="rounded-lg border border-stone-200 px-3 py-1.5 text-stone-600 hover:bg-stone-50"
+              disabled={page >= pageCount}
+              onClick={() => setPage((p) => Math.min(pageCount, p + 1))}
+              className="rounded-lg border border-stone-200 px-3 py-1.5 text-stone-600 hover:bg-stone-50 disabled:text-stone-300"
             >
               Next
             </button>
@@ -303,47 +384,20 @@ export default function StudentAffairsDashboard() {
         </div>
       </div>
 
-      <div className="mt-6 rounded-2xl border border-stone-200 bg-white p-6">
-        <h2 className="mb-5 flex items-center gap-2 text-lg font-bold text-stone-900">
-          <HistoryIcon className="h-5 w-5 text-rose-700" />
-          Recent Directory Changes
-        </h2>
-        <ul className="space-y-4">
-          {recentDirectoryChanges.slice(0, 3).map((change) => (
-            <li key={change.id} className="flex items-start gap-3">
-              <span
-                className={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${change.dotColorClassName}`}
-              />
-              <div>
-                <p className="text-sm text-stone-700">
-                  <span className="font-semibold">{change.boldText}</span>
-                  {change.restText}
-                </p>
-                <p className="mt-0.5 text-xs text-stone-400">{change.meta}</p>
-              </div>
-            </li>
-          ))}
-        </ul>
-        <button
-          type="button"
-          onClick={() => setShowAllChangesModal(true)}
-          className="mt-5 inline-flex items-center gap-1 text-sm font-semibold text-rose-700 hover:underline"
-        >
-          View All →
-        </button>
-      </div>
-
       {showBulkImportModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
           <div className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-xl">
             <div className="flex items-start justify-between">
               <div>
-                <h3 className="text-lg font-bold text-stone-900">
-                  Bulk Import Students
-                </h3>
+                <h3 className="text-lg font-bold text-stone-900">Bulk Import Students</h3>
                 <p className="mt-1 text-sm text-stone-500">
-                  Upload an Excel or CSV file to add or update multiple student
-                  records at once.
+                  Upload a CSV with a{" "}
+                  <code className="rounded bg-stone-100 px-1 text-xs">
+                    studentNumber,firstName,lastName
+                  </code>{" "}
+                  header. Optional columns: dateOfBirth, gender, personalEmail,
+                  guardianName, guardianContact, contactDetails, bloodGroup,
+                  enrollmentDate, status, departmentId.
                 </p>
               </div>
               <button
@@ -379,13 +433,11 @@ export default function StudentAffairsDashboard() {
               <p className="mt-4 font-semibold text-stone-800">
                 Drag and drop your file here
               </p>
-              <p className="mt-1 text-xs text-stone-500">
-                Supports .xlsx, .xls, and .csv files
-              </p>
+              <p className="mt-1 text-xs text-stone-500">Supports .csv files</p>
               <input
                 ref={importInputRef}
                 type="file"
-                accept=".xlsx,.xls,.csv"
+                accept=".csv,text/csv"
                 className="hidden"
                 onChange={(e) => selectImportFile(e.target.files?.[0])}
               />
@@ -430,56 +482,27 @@ export default function StudentAffairsDashboard() {
               </button>
               <button
                 type="button"
-                onClick={handleSaveImport}
-                className="rounded-lg bg-rose-800 px-5 py-2.5 text-sm font-semibold text-white hover:bg-rose-900"
+                onClick={() => {
+                  if (!importFile) {
+                    setImportError("Please select a file to import.");
+                    return;
+                  }
+                  importMutation.mutate(importFile);
+                }}
+                disabled={importMutation.isPending}
+                className="rounded-lg bg-rose-800 px-5 py-2.5 text-sm font-semibold text-white hover:bg-rose-900 disabled:opacity-60"
               >
-                Save
+                {importMutation.isPending ? "Importing…" : "Import"}
               </button>
             </div>
           </div>
         </div>
       )}
 
-      {showAllChangesModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
-          <div className="flex max-h-[80vh] w-full max-w-lg flex-col rounded-2xl bg-white p-6 shadow-xl">
-            <div className="flex items-start justify-between">
-              <h3 className="text-lg font-bold text-stone-900">
-                All Directory Changes
-              </h3>
-              <button
-                type="button"
-                onClick={() => setShowAllChangesModal(false)}
-                aria-label="Close"
-                className="text-stone-400 hover:text-stone-600"
-              >
-                <XIcon className="h-5 w-5" />
-              </button>
-            </div>
-            <ul className="mt-4 flex-1 space-y-4 overflow-y-auto pr-1">
-              {recentDirectoryChanges.map((change) => (
-                <li key={change.id} className="flex items-start gap-3">
-                  <span
-                    className={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${change.dotColorClassName}`}
-                  />
-                  <div>
-                    <p className="text-sm text-stone-700">
-                      <span className="font-semibold">{change.boldText}</span>
-                      {change.restText}
-                    </p>
-                    <p className="mt-0.5 text-xs text-stone-400">{change.meta}</p>
-                  </div>
-                </li>
-              ))}
-            </ul>
-          </div>
-        </div>
-      )}
-
-      {savedToast && (
+      {toast && (
         <div className="fixed bottom-6 right-6 z-50 flex items-center gap-3 rounded-xl bg-emerald-600 px-5 py-4 text-white shadow-xl">
           <CheckCircleIcon className="h-6 w-6 shrink-0" />
-          <p className="font-semibold">{savedToast}</p>
+          <p className="font-semibold">{toast}</p>
         </div>
       )}
     </div>

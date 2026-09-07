@@ -3,6 +3,8 @@
 import { usePathname } from "next/navigation";
 import { DashboardShell } from "@/components/dashboard-shell";
 import { FileTextIcon, GraduationCapIcon, GridIcon } from "@/components/icons";
+import { useAuth } from "@/lib/auth/auth-context";
+import { roleLabel } from "@/lib/auth/roles";
 
 function isDashboardActive(pathname: string) {
   return pathname === "/teacher";
@@ -18,6 +20,7 @@ function isExaminationActive(pathname: string) {
 
 export function TeacherShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
+  const { user } = useAuth();
 
   const navItems = [
     {
@@ -44,8 +47,8 @@ export function TeacherShell({ children }: { children: React.ReactNode }) {
     <DashboardShell
       homeHref="/teacher"
       navItems={navItems}
-      userName="Teacher Name"
-      userRole="Teacher"
+      userName={user ? `${user.firstName} ${user.lastName}` : "Teacher"}
+      userRole={user ? roleLabel(user.role) : "Teacher"}
     >
       {children}
     </DashboardShell>

@@ -1,450 +1,572 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { PageHeader } from "@/components/page-header";
-import { StatusBadge, type StatusTone } from "@/components/status-badge";
+import { StatusBadge } from "@/components/status-badge";
+import { LoadingRow, ErrorRow, EmptyRow } from "@/components/query-states";
 import {
   CheckCircleIcon,
-  ChevronDownIcon,
-  DownloadIcon,
-  EditIcon,
-  LightbulbIcon,
+  PlusIcon,
   XIcon,
 } from "@/components/icons";
+import { apiFetch, ApiRequestError } from "@/lib/api/client";
+import { useApiQuery } from "@/lib/api/hooks";
+import type {
+  AssignmentDTO,
+  CourseworkGradeDTO,
+  SubmissionDTO,
+  TeacherDashboardDTO,
+} from "@/lib/api/types";
 import {
-  assignments as initialAssignments,
-  type Assignment,
-  type RosterStudent,
-} from "@/lib/teacher/assignments-data";
+  courseworkTone,
+  fromApiTeacherClass,
+  rosterRowOf,
+} from "@/lib/teacher/dashboard-data";
+import { formatDate, percentOf, titleCase } from "@/lib/format";
 
-const badgeTone: Record<Assignment["badge"], StatusTone> = {
-  "GRADING IN PROGRESS": "rose",
-  UPCOMING: "rose",
-  GRADED: "green",
-};
+const TEACHER_KEY = ["teacher"] as const;
+const ASSIGNMENTS_KEY = [...TEACHER_KEY, "assignments"] as const;
+const SUBMISSIONS_KEY = [...TEACHER_KEY, "submissions"] as const;
+const COURSEWORK_KEY = [...TEACHER_KEY, "coursework"] as const;
 
-const submissionStatusTone: Record<RosterStudent["submissionStatus"], StatusTone> = {
-  "On Time": "green",
-  Late: "amber",
-  Missing: "rose",
-};
-
-type SortKey = "roll" | "name" | "score";
-
-interface NewAssignmentForm {
-  code: string;
-  title: string;
-  className: string;
-  totalStudents: string;
-  deadline: string;
+function errorMessage(err: unknown, fallback: string): string {
+  if (err instanceof ApiRequestError) {
+    const firstFieldError = err.errors ? Object.values(err.errors).flat()[0] : null;
+    return firstFieldError ?? err.message;
+  }
+  return fallback;
 }
 
-const emptyAssignmentForm: NewAssignmentForm = {
-  code: "",
-  title: "",
-  className: "",
-  totalStudents: "",
-  deadline: "",
-};
+const emptyAssignmentForm = { title: "", description: "", maxScore: "100", dueDate: "" };
 
-function formatDeadline(dateStr: string) {
-  const [y, m, d] = dateStr.split("-").map(Number);
-  const date = new Date(y, m - 1, d);
-  return date.toLocaleDateString("en-US", {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-  });
-}
+export default function TeacherAssignmentsPage() {
+  const queryClient = useQueryClient();
 
-export default function AssignmentGradingPage() {
-  const [assignments, setAssignments] = useState(initialAssignments);
-  const [selectedId, setSelectedId] = useState(assignments[0].id);
-  const [sortKey, setSortKey] = useState<SortKey>("roll");
-  const [draftMessage, setDraftMessage] = useState<string | null>(null);
-  const [submittedIds, setSubmittedIds] = useState<Set<string>>(new Set());
+  const [pickedClassId, setPickedClassId] = useState("");
+  const [pickedAssignmentId, setPickedAssignmentId] = useState("");
+  const [tab, setTab] = useState<"submissions" | "coursework">("submissions");
 
-  const [showCreateModal, setShowCreateModal] = useState(false);
-  const [newAssignment, setNewAssignment] = useState<NewAssignmentForm>(
-    emptyAssignmentForm,
-  );
-  const [createError, setCreateError] = useState<string | null>(null);
+  const [showCreate, setShowCreate] = useState(false);
+  const [form, setForm] = useState(emptyAssignmentForm);
+  const [formError, setFormError] = useState<string | null>(null);
+
+  const [scoreDrafts, setScoreDrafts] = useState<Record<string, string>>({});
+  const [actionError, setActionError] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
 
-  const selected = assignments.find((a) => a.id === selectedId) ?? assignments[0];
-  const isSubmitted = submittedIds.has(selected.id);
-
-  const sortedRoster = useMemo(() => {
-    const roster = [...selected.roster];
-    if (sortKey === "name") return roster.sort((a, b) => a.name.localeCompare(b.name));
-    if (sortKey === "score")
-      return roster.sort((a, b) => (b.score ?? -1) - (a.score ?? -1));
-    return roster.sort((a, b) => a.rollNo.localeCompare(b.rollNo));
-  }, [selected.roster, sortKey]);
-
-  const scores = selected.roster
-    .map((s) => s.score)
-    .filter((s): s is number => s !== null);
-  const pendingCount = selected.roster.filter((s) => s.score === null).length;
-
-  function updateStudent(
-    studentId: string,
-    patch: Partial<Pick<RosterStudent, "score" | "feedback">>,
-  ) {
-    setAssignments((prev) =>
-      prev.map((a) =>
-        a.id !== selected.id
-          ? a
-          : {
-              ...a,
-              roster: a.roster.map((s) =>
-                s.id === studentId ? { ...s, ...patch } : s,
-              ),
-            },
-      ),
-    );
+  function showToast(message: string) {
+    setToast(message);
+    window.setTimeout(() => setToast(null), 3500);
   }
 
-  function handleSaveDraft() {
-    setDraftMessage("Draft saved just now.");
-    window.setTimeout(() => setDraftMessage(null), 3000);
-  }
+  // ── Class + assignment selection ──────────────────────────────────────────
 
-  function handleSubmitToCoe() {
-    if (typeof window !== "undefined") {
-      const confirmed = window.confirm(
-        "Submit grades to COE? Once submitted, grades cannot be edited without a formal request.",
-      );
-      if (!confirmed) return;
-    }
-    setSubmittedIds((prev) => new Set(prev).add(selected.id));
-  }
+  const dashboardQuery = useApiQuery<TeacherDashboardDTO>(
+    [...TEACHER_KEY, "dashboard"],
+    "/teacher/me/dashboard",
+  );
 
-  function openCreateModal() {
-    setNewAssignment(emptyAssignmentForm);
-    setCreateError(null);
-    setShowCreateModal(true);
-  }
+  const classes = useMemo(
+    () => (dashboardQuery.data?.data.classes ?? []).map(fromApiTeacherClass),
+    [dashboardQuery.data],
+  );
 
-  function handleCreateAssignment(e: React.FormEvent) {
-    e.preventDefault();
-    if (
-      !newAssignment.code ||
-      !newAssignment.title ||
-      !newAssignment.className ||
-      !newAssignment.deadline
-    ) {
-      setCreateError("Please fill in the course code, title, class, and deadline.");
-      return;
-    }
-    const totalStudents = Number(newAssignment.totalStudents) || 0;
-    const created: Assignment = {
-      id: `asg-${Date.now()}`,
-      code: newAssignment.code.toUpperCase(),
-      title: newAssignment.title,
-      badge: "UPCOMING",
-      deadlineLabel: `Deadline: ${formatDeadline(newAssignment.deadline)}`,
-      submissionsLabel: `0/${totalStudents} Submissions`,
-      className: `${newAssignment.code.toUpperCase()}: ${newAssignment.title.toUpperCase()}`,
-      classMeta: `Class: ${newAssignment.className}`,
-      stats: { average: "—", high: "—", low: "—", pending: "00" },
-      roster: [],
+  const classId = pickedClassId || classes[0]?.id || "";
+  const selectedClass = classes.find((c) => c.id === classId);
+
+  const assignmentsQuery = useApiQuery<AssignmentDTO[]>(
+    [...ASSIGNMENTS_KEY, { classId }],
+    `/teacher/classes/${classId}/assignments`,
+    { query: { limit: 100 }, enabled: Boolean(classId) },
+  );
+
+  const assignments = useMemo(
+    () => assignmentsQuery.data?.data ?? [],
+    [assignmentsQuery.data],
+  );
+
+  const assignmentId =
+    assignments.some((a) => a.id === pickedAssignmentId)
+      ? pickedAssignmentId
+      : assignments[0]?.id ?? "";
+  const selectedAssignment = assignments.find((a) => a.id === assignmentId);
+
+  // ── Submissions & coursework ──────────────────────────────────────────────
+
+  const submissionsQuery = useApiQuery<SubmissionDTO[]>(
+    [...SUBMISSIONS_KEY, { assignmentId }],
+    `/teacher/assignments/${assignmentId}/submissions`,
+    { query: { limit: 100 }, enabled: Boolean(assignmentId) },
+  );
+
+  const courseworkQuery = useApiQuery<CourseworkGradeDTO[]>(
+    [...COURSEWORK_KEY, { classId }],
+    `/teacher/classes/${classId}/coursework-grades`,
+    { query: { limit: 100 }, enabled: Boolean(classId) },
+  );
+
+  const submissions = useMemo(
+    () =>
+      (submissionsQuery.data?.data ?? []).map((s) => ({
+        ...rosterRowOf(s.student),
+        id: s.id,
+        score: s.score,
+        submittedAt: s.submittedAt,
+        gradedAt: s.gradedAt,
+      })),
+    [submissionsQuery.data],
+  );
+
+  const coursework = useMemo(
+    () =>
+      (courseworkQuery.data?.data ?? []).map((g) => ({
+        ...rosterRowOf(g.student),
+        id: g.id,
+        courseworkScore: g.courseworkScore,
+        status: g.status,
+      })),
+    [courseworkQuery.data],
+  );
+
+  // Live stats over graded submissions only.
+  const stats = useMemo(() => {
+    const graded = submissions.filter((s) => s.score !== null);
+    const scores = graded.map((s) => s.score as number);
+    return {
+      submitted: submissions.length,
+      graded: graded.length,
+      pending: submissions.length - graded.length,
+      average: scores.length
+        ? (scores.reduce((a, b) => a + b, 0) / scores.length).toFixed(1)
+        : "—",
+      high: scores.length ? String(Math.max(...scores)) : "—",
+      low: scores.length ? String(Math.min(...scores)) : "—",
     };
-    setAssignments((prev) => [created, ...prev]);
-    setSelectedId(created.id);
-    setShowCreateModal(false);
-    setToast(`Assignment "${created.title}" has been created.`);
-    window.setTimeout(() => setToast(null), 4000);
-  }
+  }, [submissions]);
+
+  // ── Mutations ─────────────────────────────────────────────────────────────
+
+  const createAssignment = useMutation({
+    mutationFn: () =>
+      apiFetch<AssignmentDTO>(`/teacher/classes/${classId}/assignments`, {
+        method: "POST",
+        body: {
+          title: form.title.trim(),
+          ...(form.description.trim() ? { description: form.description.trim() } : {}),
+          maxScore: Number(form.maxScore),
+          dueDate: form.dueDate,
+        },
+      }),
+    onSuccess: async (res) => {
+      await queryClient.invalidateQueries({ queryKey: ASSIGNMENTS_KEY });
+      setShowCreate(false);
+      setForm(emptyAssignmentForm);
+      setFormError(null);
+      setPickedAssignmentId(res.data.id);
+      showToast(`Assignment "${res.data.title}" created.`);
+    },
+    onError: (err) => setFormError(errorMessage(err, "Could not create the assignment.")),
+  });
+
+  const gradeSubmission = useMutation({
+    mutationFn: ({ id, score }: { id: string; score: number }) =>
+      apiFetch<SubmissionDTO>(`/teacher/submissions/${id}/grade`, {
+        method: "PATCH",
+        body: { score },
+      }),
+    onMutate: () => setActionError(null),
+    onSuccess: async (_res, { id }) => {
+      await queryClient.invalidateQueries({ queryKey: SUBMISSIONS_KEY });
+      setScoreDrafts((d) => {
+        const next = { ...d };
+        delete next[id];
+        return next;
+      });
+      showToast("Score saved.");
+    },
+    onError: (err) => setActionError(errorMessage(err, "Could not save the score.")),
+  });
+
+  const submitCoursework = useMutation({
+    mutationFn: (id: string) =>
+      apiFetch<CourseworkGradeDTO>(`/teacher/coursework-grades/${id}/submit`, {
+        method: "PATCH",
+      }),
+    onMutate: () => setActionError(null),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: COURSEWORK_KEY });
+      showToast("Coursework grade submitted to the Controller of Examination.");
+    },
+    onError: (err) => setActionError(errorMessage(err, "Could not submit the grade.")),
+  });
+
+  const draftCount = coursework.filter((c) => c.status === "DRAFT").length;
 
   return (
     <div>
-      <p className="mb-1 text-sm text-stone-500">
-        Academic Year 2023-24 • Term 2
-      </p>
       <PageHeader
-        title="Assignment & Grading"
-        description="Manage coursework, track submissions, and enter student scores."
+        title="Assignments & Grading"
+        description="Create coursework, grade submissions, and release coursework scores."
         actions={
-          <>
-            <button
-              type="button"
-              className="flex items-center gap-2 rounded-lg border border-stone-300 px-5 py-2.5 text-sm font-semibold text-stone-600 hover:bg-stone-50"
-            >
-              <DownloadIcon className="h-4 w-4" />
-              Export List
-            </button>
-            <button
-              type="button"
-              onClick={openCreateModal}
-              className="flex items-center gap-2 rounded-lg bg-rose-800 px-5 py-2.5 text-sm font-semibold text-white hover:bg-rose-900"
-            >
-              <EditIcon className="h-4 w-4" />
-              Create Assignment
-            </button>
-          </>
+          <button
+            type="button"
+            onClick={() => {
+              setForm(emptyAssignmentForm);
+              setFormError(null);
+              setShowCreate(true);
+            }}
+            disabled={!classId}
+            className="flex items-center gap-2 rounded-lg bg-rose-800 px-5 py-2.5 text-sm font-semibold text-white hover:bg-rose-900 disabled:opacity-60"
+          >
+            <PlusIcon className="h-4 w-4" />
+            New Assignment
+          </button>
         }
       />
 
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-[320px_1fr]">
-        <section className="h-fit rounded-2xl border border-stone-200 bg-white p-5">
-          <div className="mb-4 flex items-center justify-between">
-            <h2 className="text-lg font-bold text-stone-900">
-              Active Assignments
-            </h2>
-            <StatusBadge label={`${assignments.length} TOTAL`} tone="rose" />
+      <div className="mb-6 flex flex-wrap items-center gap-3">
+        <select
+          aria-label="Class"
+          value={classId}
+          onChange={(e) => {
+            setPickedClassId(e.target.value);
+            setPickedAssignmentId("");
+          }}
+          disabled={dashboardQuery.isLoading || classes.length === 0}
+          className="rounded-lg border border-stone-300 bg-white px-4 py-2.5 text-sm font-semibold text-stone-600 outline-none focus:border-rose-400 disabled:bg-stone-50"
+        >
+          {classes.length === 0 && <option>No classes assigned</option>}
+          {classes.map((c) => (
+            <option key={c.id} value={c.id}>
+              {c.code} — {c.name}
+            </option>
+          ))}
+        </select>
+
+        {selectedClass && (
+          <StatusBadge
+            label={`${selectedClass.enrolled} enrolled`}
+            tone="rose"
+          />
+        )}
+      </div>
+
+      <div className="mb-6 grid grid-cols-2 gap-4 sm:grid-cols-4">
+        {[
+          { label: "Submissions", value: String(stats.submitted) },
+          { label: "Average Score", value: stats.average },
+          { label: "Highest", value: stats.high },
+          { label: "Pending Grading", value: String(stats.pending) },
+        ].map((card) => (
+          <div
+            key={card.label}
+            className="rounded-2xl border border-stone-200 bg-white p-5"
+          >
+            <p className="text-xs font-bold uppercase tracking-wide text-stone-500">
+              {card.label}
+            </p>
+            <p className="mt-2 text-2xl font-bold text-stone-900">{card.value}</p>
           </div>
-          <ul className="space-y-3">
-            {assignments.map((assignment) => {
-              const active = assignment.id === selected.id;
-              return (
-                <li key={assignment.id}>
+        ))}
+      </div>
+
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-[280px_1fr]">
+        <aside className="rounded-2xl border border-stone-200 bg-white">
+          <div className="border-b border-stone-200 p-5">
+            <h2 className="font-bold text-stone-900">Assignments</h2>
+            <p className="text-xs text-stone-500">
+              {assignments.length} in this class
+            </p>
+          </div>
+          {assignmentsQuery.isLoading ? (
+            <p className="p-5 text-sm text-stone-400">Loading…</p>
+          ) : assignments.length === 0 ? (
+            <p className="p-5 text-sm text-stone-400">
+              No assignments yet for this class.
+            </p>
+          ) : (
+            <ul className="divide-y divide-stone-100">
+              {assignments.map((a) => (
+                <li key={a.id}>
                   <button
                     type="button"
-                    onClick={() => setSelectedId(assignment.id)}
-                    className={`w-full rounded-xl border p-4 text-left transition-colors ${
-                      active
-                        ? "border-rose-700 bg-rose-50"
-                        : "border-stone-200 hover:border-stone-300"
+                    onClick={() => setPickedAssignmentId(a.id)}
+                    className={`w-full px-5 py-4 text-left transition-colors ${
+                      a.id === assignmentId ? "bg-rose-50" : "hover:bg-stone-50"
                     }`}
                   >
-                    <div className="flex items-center justify-between">
-                      <span className="text-sm font-bold text-rose-700">
-                        {assignment.code}
-                      </span>
-                      <StatusBadge
-                        label={assignment.badge}
-                        tone={badgeTone[assignment.badge]}
-                      />
-                    </div>
-                    <p className="mt-2 font-semibold text-stone-900">
-                      {assignment.title}
+                    <p
+                      className={`text-sm font-semibold ${
+                        a.id === assignmentId ? "text-rose-800" : "text-stone-800"
+                      }`}
+                    >
+                      {a.title}
                     </p>
-                    <p className="mt-1 text-sm text-stone-500">
-                      {assignment.deadlineLabel}
-                    </p>
-                    <p className="mt-2 text-sm font-semibold text-stone-600">
-                      {assignment.submissionsLabel}
+                    <p className="mt-1 text-xs text-stone-500">
+                      Due {formatDate(a.dueDate)} · {a.maxScore} marks
                     </p>
                   </button>
                 </li>
-              );
-            })}
-          </ul>
-        </section>
+              ))}
+            </ul>
+          )}
+        </aside>
 
-        <div className="space-y-6">
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-4">
-            <div className="rounded-2xl border border-stone-200 bg-white p-5">
-              <p className="text-sm text-stone-500">Average Grade</p>
-              <p className="mt-1 text-2xl font-bold text-rose-700">
-                {selected.stats.average}
+        <section className="rounded-2xl border border-stone-200 bg-white">
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-stone-200 p-5">
+            <div>
+              <h2 className="text-lg font-bold text-stone-900">
+                {tab === "submissions"
+                  ? (selectedAssignment?.title ?? "Submissions")
+                  : "Coursework Grades"}
+              </h2>
+              <p className="text-xs text-stone-500">
+                {tab === "submissions"
+                  ? selectedAssignment
+                    ? `Max ${selectedAssignment.maxScore} · due ${formatDate(selectedAssignment.dueDate)}`
+                    : "Select an assignment"
+                  : `${draftCount} draft${draftCount === 1 ? "" : "s"} not yet sent to the COE`}
               </p>
             </div>
-            <div className="rounded-2xl border border-stone-200 bg-white p-5">
-              <p className="text-sm text-stone-500">High Score</p>
-              <p className="mt-1 text-2xl font-bold text-emerald-600">
-                {selected.stats.high}
-              </p>
-            </div>
-            <div className="rounded-2xl border border-stone-200 bg-white p-5">
-              <p className="text-sm text-stone-500">Low Score</p>
-              <p className="mt-1 text-2xl font-bold text-rose-700">
-                {selected.stats.low}
-              </p>
-            </div>
-            <div className="rounded-2xl border border-stone-200 bg-white p-5">
-              <p className="text-sm text-stone-500">Pending Review</p>
-              <p className="mt-1 text-2xl font-bold text-amber-600">
-                {selected.stats.pending}
-              </p>
+            <div className="flex items-center gap-1 rounded-lg bg-stone-100 p-1">
+              <button
+                type="button"
+                onClick={() => setTab("submissions")}
+                className={`rounded-md px-3 py-1.5 text-xs font-semibold ${
+                  tab === "submissions" ? "bg-white text-stone-800 shadow-sm" : "text-stone-500"
+                }`}
+              >
+                Submissions
+              </button>
+              <button
+                type="button"
+                onClick={() => setTab("coursework")}
+                className={`rounded-md px-3 py-1.5 text-xs font-semibold ${
+                  tab === "coursework" ? "bg-white text-stone-800 shadow-sm" : "text-stone-500"
+                }`}
+              >
+                Coursework
+              </button>
             </div>
           </div>
 
-          <section className="rounded-2xl border border-stone-200 bg-white">
-            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-stone-200 p-6">
-              <div>
-                <h2 className="text-lg font-bold uppercase text-stone-900">
-                  {selected.className}
-                </h2>
-                <p className="text-sm text-stone-500">{selected.classMeta}</p>
-              </div>
-              <div className="relative">
-                <select
-                  value={sortKey}
-                  onChange={(e) => setSortKey(e.target.value as SortKey)}
-                  className="appearance-none rounded-lg border border-stone-200 bg-white py-2 pl-9 pr-8 text-sm font-medium text-stone-700 outline-none focus:border-rose-400"
-                >
-                  <option value="roll">Sort by Roll No.</option>
-                  <option value="name">Sort by Name</option>
-                  <option value="score">Sort by Score</option>
-                </select>
-                <ChevronDownIcon className="pointer-events-none absolute right-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-stone-400" />
-              </div>
-            </div>
+          {actionError && (
+            <p className="border-b border-stone-200 px-5 py-3 text-sm font-medium text-rose-600">
+              {actionError}
+            </p>
+          )}
 
-            {sortedRoster.length === 0 ? (
-              <p className="p-10 text-center text-sm text-stone-400">
-                No submissions yet for this assignment.
-              </p>
-            ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full text-left text-sm">
-                  <thead>
-                    <tr className="text-xs font-bold uppercase tracking-wide text-stone-400">
-                      <th className="px-6 py-3">Roll No.</th>
-                      <th className="px-6 py-3">Student Name</th>
-                      <th className="px-6 py-3">Submission Status</th>
-                      <th className="px-6 py-3">Score / 100</th>
-                      <th className="px-6 py-3">Feedback</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-stone-100">
-                    {sortedRoster.map((student) => (
-                      <tr
-                        key={student.id}
-                        className={
-                          student.score === null && !isSubmitted
-                            ? "bg-rose-50/50"
-                            : ""
-                        }
-                      >
-                        <td className="px-6 py-4 font-mono text-stone-600">
-                          {student.rollNo}
-                        </td>
-                        <td className="px-6 py-4">
+          <div className="overflow-x-auto">
+            {tab === "submissions" ? (
+              <table className="w-full text-left text-sm">
+                <thead>
+                  <tr className="text-xs font-bold uppercase tracking-wide text-stone-400">
+                    <th className="px-5 py-3">Student</th>
+                    <th className="px-5 py-3">Submitted</th>
+                    <th className="px-5 py-3">Score</th>
+                    <th className="px-5 py-3 text-right">Grade</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-stone-100">
+                  {submissionsQuery.isLoading && <LoadingRow colSpan={4} />}
+                  {submissionsQuery.isError && (
+                    <ErrorRow
+                      colSpan={4}
+                      message={submissionsQuery.error.message}
+                      onRetry={() => submissionsQuery.refetch()}
+                    />
+                  )}
+                  {!submissionsQuery.isLoading &&
+                    !submissionsQuery.isError &&
+                    submissions.map((s) => (
+                      <tr key={s.id}>
+                        <td className="px-5 py-3">
                           <div className="flex items-center gap-2.5">
                             <span
-                              className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-xs font-bold ${student.avatarColorClassName}`}
+                              className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-xs font-bold ${s.avatarColorClassName}`}
                             >
-                              {student.initials}
+                              {s.initials}
                             </span>
-                            <span className="font-medium text-stone-800">
-                              {student.name}
-                            </span>
+                            <div>
+                              <p className="font-medium text-stone-800">{s.name}</p>
+                              <p className="font-mono text-xs text-stone-400">
+                                {s.studentNumber}
+                              </p>
+                            </div>
                           </div>
                         </td>
-                        <td className="px-6 py-4">
-                          <StatusBadge
-                            label={student.submissionStatus}
-                            tone={submissionStatusTone[student.submissionStatus]}
-                          />
+                        <td className="px-5 py-3 text-stone-600">
+                          {formatDate(s.submittedAt)}
                         </td>
-                        <td className="px-6 py-4">
-                          <input
-                            type="number"
-                            min={0}
-                            max={100}
-                            disabled={isSubmitted}
-                            value={student.score ?? ""}
-                            placeholder="--"
-                            onChange={(e) =>
-                              updateStudent(student.id, {
-                                score:
-                                  e.target.value === ""
-                                    ? null
-                                    : Number(e.target.value),
-                              })
-                            }
-                            className="w-20 rounded-lg border border-rose-200 px-3 py-1.5 text-center font-semibold text-stone-800 outline-none focus:border-rose-400 disabled:bg-stone-50 disabled:text-stone-400"
-                          />
+                        <td className="px-5 py-3">
+                          {s.score === null ? (
+                            <span className="text-xs text-amber-600">Ungraded</span>
+                          ) : (
+                            <span className="font-semibold text-stone-800">
+                              {s.score}
+                              <span className="text-stone-400">
+                                /{selectedAssignment?.maxScore ?? 100}
+                              </span>
+                            </span>
+                          )}
                         </td>
-                        <td className="px-6 py-4">
-                          <input
-                            type="text"
-                            disabled={isSubmitted}
-                            value={student.feedback}
-                            placeholder="Add comments..."
-                            onChange={(e) =>
-                              updateStudent(student.id, {
-                                feedback: e.target.value,
-                              })
-                            }
-                            className={`w-full min-w-[180px] rounded-lg border border-transparent bg-transparent px-2 py-1.5 italic outline-none focus:border-rose-200 disabled:text-stone-400 ${
-                              student.submissionStatus === "Missing"
-                                ? "text-rose-600"
-                                : "text-stone-500"
-                            }`}
-                          />
+                        <td className="px-5 py-3">
+                          <div className="flex items-center justify-end gap-2">
+                            <input
+                              type="number"
+                              min={0}
+                              max={selectedAssignment?.maxScore ?? 100}
+                              aria-label={`Score for ${s.name}`}
+                              value={scoreDrafts[s.id] ?? String(s.score ?? "")}
+                              onChange={(e) =>
+                                setScoreDrafts((d) => ({ ...d, [s.id]: e.target.value }))
+                              }
+                              className="w-20 rounded-lg border border-stone-200 px-2 py-1.5 text-sm outline-none focus:border-rose-400"
+                            />
+                            <button
+                              type="button"
+                              disabled={gradeSubmission.isPending}
+                              onClick={() => {
+                                const raw = scoreDrafts[s.id] ?? String(s.score ?? "");
+                                const score = Number(raw);
+                                if (raw === "" || Number.isNaN(score)) {
+                                  setActionError("Enter a numeric score.");
+                                  return;
+                                }
+                                gradeSubmission.mutate({ id: s.id, score });
+                              }}
+                              className="rounded-lg bg-rose-800 px-3 py-1.5 text-xs font-semibold text-white hover:bg-rose-900 disabled:opacity-60"
+                            >
+                              Save
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     ))}
-                  </tbody>
-                </table>
-              </div>
+                  {!submissionsQuery.isLoading &&
+                    !submissionsQuery.isError &&
+                    submissions.length === 0 && (
+                      <EmptyRow
+                        colSpan={4}
+                        label={
+                          assignmentId
+                            ? "No submissions for this assignment yet."
+                            : "Select an assignment to see submissions."
+                        }
+                      />
+                    )}
+                </tbody>
+              </table>
+            ) : (
+              <table className="w-full text-left text-sm">
+                <thead>
+                  <tr className="text-xs font-bold uppercase tracking-wide text-stone-400">
+                    <th className="px-5 py-3">Student</th>
+                    <th className="px-5 py-3">Coursework Score</th>
+                    <th className="px-5 py-3">Status</th>
+                    <th className="px-5 py-3 text-right">Action</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-stone-100">
+                  {courseworkQuery.isLoading && <LoadingRow colSpan={4} />}
+                  {courseworkQuery.isError && (
+                    <ErrorRow
+                      colSpan={4}
+                      message={courseworkQuery.error.message}
+                      onRetry={() => courseworkQuery.refetch()}
+                    />
+                  )}
+                  {!courseworkQuery.isLoading &&
+                    !courseworkQuery.isError &&
+                    coursework.map((g) => (
+                      <tr key={g.id}>
+                        <td className="px-5 py-3">
+                          <div className="flex items-center gap-2.5">
+                            <span
+                              className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-xs font-bold ${g.avatarColorClassName}`}
+                            >
+                              {g.initials}
+                            </span>
+                            <div>
+                              <p className="font-medium text-stone-800">{g.name}</p>
+                              <p className="font-mono text-xs text-stone-400">
+                                {g.studentNumber}
+                              </p>
+                            </div>
+                          </div>
+                        </td>
+                        <td className="px-5 py-3">
+                          <div className="flex items-center gap-3">
+                            <div className="h-1.5 w-24 overflow-hidden rounded-full bg-stone-100">
+                              <div
+                                className="h-full rounded-full bg-rose-700"
+                                style={{ width: `${percentOf(g.courseworkScore, 100)}%` }}
+                              />
+                            </div>
+                            <span className="font-semibold text-stone-800">
+                              {g.courseworkScore}
+                            </span>
+                          </div>
+                        </td>
+                        <td className="px-5 py-3">
+                          <StatusBadge
+                            label={titleCase(g.status)}
+                            tone={courseworkTone[g.status]}
+                          />
+                        </td>
+                        <td className="px-5 py-3 text-right">
+                          {g.status === "SUBMITTED" ? (
+                            <span className="text-xs text-stone-400">Sent to COE</span>
+                          ) : (
+                            <button
+                              type="button"
+                              disabled={submitCoursework.isPending}
+                              onClick={() => submitCoursework.mutate(g.id)}
+                              className="text-sm font-semibold text-rose-700 hover:underline disabled:text-stone-300"
+                            >
+                              Submit
+                            </button>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  {!courseworkQuery.isLoading &&
+                    !courseworkQuery.isError &&
+                    coursework.length === 0 && (
+                      <EmptyRow colSpan={4} label="No coursework grades recorded yet." />
+                    )}
+                </tbody>
+              </table>
             )}
-
-            <div className="flex flex-wrap items-center justify-between gap-4 border-t border-stone-200 p-6">
-              <div className="flex items-center gap-5 text-sm">
-                <span className="flex items-center gap-2">
-                  <span className="h-3 w-3 rounded-sm bg-emerald-500" />
-                  {scores.length} Graded
-                </span>
-                <span className="flex items-center gap-2">
-                  <span className="h-3 w-3 rounded-sm bg-amber-400" />
-                  {pendingCount} Pending
-                </span>
-                {draftMessage && (
-                  <span className="text-stone-500">{draftMessage}</span>
-                )}
-              </div>
-              <div className="flex items-center gap-3">
-                <button
-                  type="button"
-                  onClick={handleSaveDraft}
-                  className="rounded-lg border border-stone-300 px-5 py-2.5 text-sm font-semibold text-stone-600 hover:bg-stone-50"
-                >
-                  Save Draft
-                </button>
-                <button
-                  type="button"
-                  onClick={handleSubmitToCoe}
-                  disabled={isSubmitted}
-                  className="flex items-center gap-2 rounded-lg bg-rose-800 px-5 py-2.5 text-sm font-semibold text-white hover:bg-rose-900 disabled:opacity-60"
-                >
-                  <CheckCircleIcon className="h-4 w-4" />
-                  {isSubmitted ? "Submitted to COE" : "Submit to COE"}
-                </button>
-              </div>
-            </div>
-          </section>
-
-          <div className="flex items-start gap-4 rounded-2xl bg-teal-800 p-6 text-white">
-            <LightbulbIcon className="mt-0.5 h-6 w-6 shrink-0 text-teal-200" />
-            <div>
-              <p className="font-bold">
-                Notice from Controller of Examination (COE)
-              </p>
-              <p className="mt-1 text-sm text-teal-100">
-                Please ensure all grades are entered by Friday, 5 PM. Once
-                submitted to COE, grades cannot be modified without a formal
-                request to the department head. Auto-save is enabled for your
-                session.
-              </p>
-            </div>
           </div>
-        </div>
+        </section>
       </div>
 
-      {showCreateModal && (
+      {showCreate && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
           <form
-            onSubmit={handleCreateAssignment}
             noValidate
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (!form.title.trim() || !form.dueDate) {
+                setFormError("Title and due date are required.");
+                return;
+              }
+              createAssignment.mutate();
+            }}
             className="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl"
           >
             <div className="flex items-start justify-between">
               <div>
-                <h3 className="text-lg font-bold text-stone-900">
-                  Create Assignment
-                </h3>
+                <h3 className="text-lg font-bold text-stone-900">New Assignment</h3>
                 <p className="mt-1 text-sm text-stone-500">
-                  Add a new assignment for your students.
+                  For {selectedClass?.code} — {selectedClass?.name}
                 </p>
               </div>
               <button
                 type="button"
-                onClick={() => setShowCreateModal(false)}
+                onClick={() => setShowCreate(false)}
                 aria-label="Close"
                 className="text-stone-400 hover:text-stone-600"
               >
@@ -453,99 +575,96 @@ export default function AssignmentGradingPage() {
             </div>
 
             <div className="mt-5 space-y-3">
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="mb-1.5 block text-xs font-bold uppercase tracking-wide text-stone-500">
-                    Course Code
-                  </label>
-                  <input
-                    placeholder="e.g. CS-402"
-                    value={newAssignment.code}
-                    onChange={(e) =>
-                      setNewAssignment((f) => ({ ...f, code: e.target.value }))
-                    }
-                    className="w-full rounded-lg border border-stone-200 px-4 py-2.5 text-sm outline-none focus:border-rose-400"
-                  />
-                </div>
-                <div>
-                  <label className="mb-1.5 block text-xs font-bold uppercase tracking-wide text-stone-500">
-                    Deadline
-                  </label>
-                  <input
-                    type="date"
-                    value={newAssignment.deadline}
-                    onChange={(e) =>
-                      setNewAssignment((f) => ({ ...f, deadline: e.target.value }))
-                    }
-                    className="w-full rounded-lg border border-stone-200 px-4 py-2.5 text-sm outline-none focus:border-rose-400"
-                  />
-                </div>
-              </div>
               <div>
-                <label className="mb-1.5 block text-xs font-bold uppercase tracking-wide text-stone-500">
-                  Assignment Title
+                <label
+                  htmlFor="a-title"
+                  className="mb-1.5 block text-xs font-bold uppercase tracking-wide text-stone-500"
+                >
+                  Title
                 </label>
                 <input
-                  placeholder="e.g. Midterm Project Proposal"
-                  value={newAssignment.title}
+                  id="a-title"
+                  required
+                  placeholder="e.g. Assignment 3"
+                  value={form.title}
+                  onChange={(e) => setForm((f) => ({ ...f, title: e.target.value }))}
+                  className="w-full rounded-lg border border-stone-200 px-4 py-2.5 text-sm outline-none focus:border-rose-400"
+                />
+              </div>
+              <div>
+                <label
+                  htmlFor="a-desc"
+                  className="mb-1.5 block text-xs font-bold uppercase tracking-wide text-stone-500"
+                >
+                  Description
+                </label>
+                <textarea
+                  id="a-desc"
+                  rows={3}
+                  placeholder="What students need to submit"
+                  value={form.description}
                   onChange={(e) =>
-                    setNewAssignment((f) => ({ ...f, title: e.target.value }))
+                    setForm((f) => ({ ...f, description: e.target.value }))
                   }
                   className="w-full rounded-lg border border-stone-200 px-4 py-2.5 text-sm outline-none focus:border-rose-400"
                 />
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="mb-1.5 block text-xs font-bold uppercase tracking-wide text-stone-500">
-                    Class / Section
+                  <label
+                    htmlFor="a-max"
+                    className="mb-1.5 block text-xs font-bold uppercase tracking-wide text-stone-500"
+                  >
+                    Max Score
                   </label>
                   <input
-                    placeholder="e.g. 4th Year - Section B"
-                    value={newAssignment.className}
-                    onChange={(e) =>
-                      setNewAssignment((f) => ({ ...f, className: e.target.value }))
-                    }
+                    id="a-max"
+                    type="number"
+                    min={0}
+                    max={1000}
+                    required
+                    value={form.maxScore}
+                    onChange={(e) => setForm((f) => ({ ...f, maxScore: e.target.value }))}
                     className="w-full rounded-lg border border-stone-200 px-4 py-2.5 text-sm outline-none focus:border-rose-400"
                   />
                 </div>
                 <div>
-                  <label className="mb-1.5 block text-xs font-bold uppercase tracking-wide text-stone-500">
-                    Total Students
+                  <label
+                    htmlFor="a-due"
+                    className="mb-1.5 block text-xs font-bold uppercase tracking-wide text-stone-500"
+                  >
+                    Due Date
                   </label>
                   <input
-                    type="number"
-                    min={0}
-                    placeholder="e.g. 25"
-                    value={newAssignment.totalStudents}
-                    onChange={(e) =>
-                      setNewAssignment((f) => ({
-                        ...f,
-                        totalStudents: e.target.value,
-                      }))
-                    }
+                    id="a-due"
+                    type="date"
+                    required
+                    value={form.dueDate}
+                    onChange={(e) => setForm((f) => ({ ...f, dueDate: e.target.value }))}
                     className="w-full rounded-lg border border-stone-200 px-4 py-2.5 text-sm outline-none focus:border-rose-400"
                   />
                 </div>
               </div>
             </div>
 
-            {createError && (
-              <p className="mt-3 text-sm font-medium text-rose-600">{createError}</p>
+            {formError && (
+              <p className="mt-3 text-sm font-medium text-rose-600">{formError}</p>
             )}
 
             <div className="mt-6 flex items-center justify-end gap-4">
               <button
                 type="button"
-                onClick={() => setShowCreateModal(false)}
+                onClick={() => setShowCreate(false)}
                 className="text-sm font-semibold text-stone-500 hover:text-stone-700"
               >
                 Cancel
               </button>
               <button
                 type="submit"
-                className="rounded-lg bg-rose-800 px-5 py-2.5 text-sm font-semibold text-white hover:bg-rose-900"
+                disabled={createAssignment.isPending}
+                className="rounded-lg bg-rose-800 px-5 py-2.5 text-sm font-semibold text-white hover:bg-rose-900 disabled:opacity-60"
               >
-                Create Assignment
+                {createAssignment.isPending ? "Creating…" : "Create Assignment"}
               </button>
             </div>
           </form>

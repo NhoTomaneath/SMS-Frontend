@@ -1,44 +1,42 @@
 "use client";
 
 import Link from "next/link";
-import { useRef, useState } from "react";
+import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { PageHeader } from "@/components/page-header";
+import { FileDropzone, UploadedFileRow } from "@/components/file-upload";
 import {
   CameraIcon,
-  ChevronDownIcon,
   CheckCircleIcon,
-  FileTextIcon,
+  ChevronDownIcon,
   GraduationCapIcon,
   InfoIcon,
-  UploadCloudIcon,
   UserIcon,
-  XIcon,
 } from "@/components/icons";
+import { apiFetch, ApiRequestError } from "@/lib/api/client";
+import { useApiQuery } from "@/lib/api/hooks";
+import type {
+  CreateStudentBody,
+  DepartmentDTO,
+  DocumentTypeDTO,
+  StudentDocumentDTO,
+  StudentDTO,
+  StudentSummaryDTO,
+} from "@/lib/api/types";
+import {
+  DOCUMENT_UPLOAD_TYPES,
+  IMAGE_UPLOAD_TYPES,
+  type UploadedFileDTO,
+} from "@/lib/api/upload";
+import {
+  BLOOD_GROUP_OPTIONS,
+  GENDER_OPTIONS,
+  STUDENT_STATUS_OPTIONS,
+} from "@/lib/student-affairs/students";
 
-interface EnrollmentDocument {
-  id: string;
-  name: string;
-}
-
-const GENDER_OPTIONS = ["Male", "Female", "Other", "Prefer not to say"];
-const BLOOD_GROUP_OPTIONS = ["A+", "A-", "B+", "B-", "O+", "O-", "AB+", "AB-"];
-const ACADEMIC_YEAR_OPTIONS = ["2024-2025", "2025-2026", "2023-2024"];
-const DEPARTMENT_OPTIONS = [
-  "Faculty of Computer Science",
-  "Faculty of Business Administration",
-  "Faculty of Engineering",
-  "Faculty of Arts & Humanities",
-  "Faculty of Applied Sciences",
-];
-
-const STEPS = [
-  { id: 1, label: "Personal Details" },
-  { id: 2, label: "Academic Background" },
-  { id: 3, label: "ID Assignment" },
-];
-
-const REQUIRED_DOC_COUNT = 3;
+const SAO_KEY = ["student-affairs"] as const;
+const DEPARTMENTS_KEY = ["lookups", "departments"] as const;
 
 function TextField({
   id,
@@ -48,6 +46,7 @@ function TextField({
   value,
   onChange,
   required,
+  max,
 }: {
   id: string;
   label: string;
@@ -56,6 +55,7 @@ function TextField({
   value: string;
   onChange: (value: string) => void;
   required?: boolean;
+  max?: string;
 }) {
   return (
     <div>
@@ -64,6 +64,7 @@ function TextField({
         className="mb-2 block text-xs font-bold uppercase tracking-wide text-stone-500"
       >
         {label}
+        {required && <span className="ml-1 text-rose-600">*</span>}
       </label>
       <input
         id={id}
@@ -71,6 +72,7 @@ function TextField({
         placeholder={placeholder}
         value={value}
         required={required}
+        {...(max ? { max } : {})}
         onChange={(e) => onChange(e.target.value)}
         className="w-full rounded-lg border border-stone-200 px-4 py-3 text-sm text-stone-900 placeholder:text-stone-400 outline-none focus:border-rose-400 focus:ring-2 focus:ring-rose-100"
       />
@@ -85,13 +87,17 @@ function SelectField({
   onChange,
   options,
   placeholder,
+  disabled,
+  required,
 }: {
   id: string;
   label: string;
   value: string;
   onChange: (value: string) => void;
-  options: string[];
+  options: ReadonlyArray<{ value: string; label: string }>;
   placeholder: string;
+  disabled?: boolean;
+  required?: boolean;
 }) {
   return (
     <div>
@@ -100,20 +106,20 @@ function SelectField({
         className="mb-2 block text-xs font-bold uppercase tracking-wide text-stone-500"
       >
         {label}
+        {required && <span className="ml-1 text-rose-600">*</span>}
       </label>
       <div className="relative">
         <select
           id={id}
           value={value}
+          disabled={disabled}
           onChange={(e) => onChange(e.target.value)}
-          className="w-full appearance-none rounded-lg border border-stone-200 bg-white px-4 py-3 text-sm text-stone-900 outline-none focus:border-rose-400 focus:ring-2 focus:ring-rose-100"
+          className="w-full appearance-none rounded-lg border border-stone-200 bg-white px-4 py-3 text-sm text-stone-900 outline-none focus:border-rose-400 focus:ring-2 focus:ring-rose-100 disabled:bg-stone-50"
         >
-          <option value="" disabled>
-            {placeholder}
-          </option>
+          <option value="">{placeholder}</option>
           {options.map((option) => (
-            <option key={option} value={option}>
-              {option}
+            <option key={option.value} value={option.value}>
+              {option.label}
             </option>
           ))}
         </select>
@@ -123,95 +129,217 @@ function SelectField({
   );
 }
 
+const emptyForm = {
+  studentNumber: "",
+  firstName: "",
+  lastName: "",
+  dateOfBirth: "",
+  gender: "",
+  personalEmail: "",
+  contactDetails: "",
+  guardianName: "",
+  guardianContact: "",
+  bloodGroup: "",
+  enrollmentDate: "",
+  status: "ENROLLED",
+  departmentId: "",
+};
+
+type FormState = typeof emptyForm;
+
 export default function StudentEnrollmentPage() {
   const router = useRouter();
-  const portraitInputRef = useRef<HTMLInputElement>(null);
-  const documentInputRef = useRef<HTMLInputElement>(null);
+  const queryClient = useQueryClient();
 
-  const [firstName, setFirstName] = useState("");
-  const [lastName, setLastName] = useState("");
-  const [dob, setDob] = useState("");
-  const [gender, setGender] = useState("");
-  const [email, setEmail] = useState("");
-  const [mobile, setMobile] = useState("");
-  const [bloodGroup, setBloodGroup] = useState("");
-  const [academicYear, setAcademicYear] = useState(ACADEMIC_YEAR_OPTIONS[0]);
-  const [department, setDepartment] = useState(DEPARTMENT_OPTIONS[0]);
-
-  const [portraitPreview, setPortraitPreview] = useState<string | null>(null);
-  const [portraitError, setPortraitError] = useState<string | null>(null);
-
-  const [documents, setDocuments] = useState<EnrollmentDocument[]>([
-    { id: "doc-1", name: "birth_cert.pdf" },
-  ]);
-  const [isDraggingDocs, setIsDraggingDocs] = useState(false);
-
+  const [form, setForm] = useState<FormState>(emptyForm);
   const [formError, setFormError] = useState<string | null>(null);
-  const [draftMessage, setDraftMessage] = useState<string | null>(null);
-  const [assignedId, setAssignedId] = useState<string | null>(null);
+  const [created, setCreated] = useState<StudentDTO | null>(null);
 
-  const currentStep = assignedId ? 3 : 1;
-  const documentsVerifiedLabel =
-    documents.length >= REQUIRED_DOC_COUNT
-      ? "Verified"
-      : `Pending (${documents.length}/${REQUIRED_DOC_COUNT})`;
+  // Files upload immediately (they need no student), but a document row can
+  // only be attached once the record exists — so hold them until then.
+  const [portrait, setPortrait] = useState<UploadedFileDTO | null>(null);
+  const [pendingDocs, setPendingDocs] = useState<
+    Array<{ name: string; url: string; size: number | null; documentType: DocumentTypeDTO }>
+  >([]);
+  const [docType, setDocType] = useState<DocumentTypeDTO>("ID_CARD");
+  const [attachError, setAttachError] = useState<string | null>(null);
+  const [attachedCount, setAttachedCount] = useState(0);
 
-  function handlePortraitChange(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    if (!["image/jpeg", "image/png"].includes(file.type)) {
-      setPortraitError("Only JPG or PNG files are allowed.");
-      return;
-    }
-    if (file.size > 5 * 1024 * 1024) {
-      setPortraitError("Image must be 5MB or smaller.");
-      return;
-    }
-    setPortraitError(null);
-    setPortraitPreview(URL.createObjectURL(file));
-  }
+  const set = <K extends keyof FormState>(key: K) => (value: FormState[K]) =>
+    setForm((f) => ({ ...f, [key]: value }));
 
-  function addDocuments(fileList: FileList | null) {
-    if (!fileList || fileList.length === 0) return;
-    const newDocs = Array.from(fileList).map((file, index) => ({
-      id: `doc-${Date.now()}-${index}`,
-      name: file.name,
-    }));
-    setDocuments((prev) => [...prev, ...newDocs]);
-  }
+  const departmentsQuery = useApiQuery<DepartmentDTO[]>(
+    DEPARTMENTS_KEY,
+    "/student-affairs/departments",
+  );
+  const departments = departmentsQuery.data?.data ?? [];
 
-  function removeDocument(id: string) {
-    setDocuments((prev) => prev.filter((doc) => doc.id !== id));
-  }
+  // The student number is the one field the backend will not invent, and it
+  // must be unique — suggest the next in sequence from the current total.
+  const summaryQuery = useApiQuery<StudentSummaryDTO>(
+    [...SAO_KEY, "students", "summary"],
+    "/student-affairs/students/summary",
+  );
+  const suggestedNumber = `KIT-${new Date().getFullYear()}-${String(
+    (summaryQuery.data?.data.total ?? 0) + 1001,
+  ).padStart(4, "0")}`;
 
-  function handleCancel() {
-    if (firstName || lastName || email) {
-      const confirmed = window.confirm(
-        "Discard this enrollment? Unsaved changes will be lost.",
+  const createMutation = useMutation({
+    mutationFn: (body: CreateStudentBody) =>
+      apiFetch<StudentDTO>("/student-affairs/students", { method: "POST", body }),
+    onSuccess: async (res) => {
+      await queryClient.invalidateQueries({ queryKey: SAO_KEY });
+      setCreated(res.data);
+      setFormError(null);
+      if (pendingDocs.length > 0) attachDocuments.mutate(res.data.id);
+    },
+    onError: (err) => {
+      if (err instanceof ApiRequestError) {
+        const firstFieldError = err.errors ? Object.values(err.errors).flat()[0] : null;
+        setFormError(firstFieldError ?? err.message);
+      } else {
+        setFormError("Something went wrong. Please try again.");
+      }
+    },
+  });
+
+  /**
+   * Documents are attached after creation because the endpoint is scoped to a
+   * student id. Each is a separate POST, so report partial failures rather
+   * than losing the whole batch.
+   */
+  const attachDocuments = useMutation({
+    mutationFn: async (studentId: string) => {
+      const results = await Promise.allSettled(
+        pendingDocs.map((doc) =>
+          apiFetch<StudentDocumentDTO>(
+            `/student-affairs/students/${studentId}/documents`,
+            { method: "POST", body: { documentType: doc.documentType, fileUrl: doc.url } },
+          ),
+        ),
       );
-      if (!confirmed) return;
-    }
-    router.push("/student-affairs");
-  }
+      const failed = results.filter((r) => r.status === "rejected").length;
+      return { attached: results.length - failed, failed };
+    },
+    onSuccess: ({ attached, failed }) => {
+      setAttachedCount(attached);
+      setPendingDocs([]);
+      setAttachError(
+        failed > 0 ? `${failed} document(s) could not be attached.` : null,
+      );
+    },
+    onError: () => setAttachError("Could not attach the documents."),
+  });
 
-  function handleSaveDraft() {
-    setDraftMessage("Draft saved just now.");
-    window.setTimeout(() => setDraftMessage(null), 3000);
-  }
-
-  function handleAssignId(e: React.FormEvent) {
+  function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!firstName || !lastName || !dob || !gender || !email || !department) {
-      setFormError(
-        "Please complete all required fields before assigning a student ID.",
-      );
+    const studentNumber = form.studentNumber.trim() || suggestedNumber;
+
+    if (!form.firstName.trim() || !form.lastName.trim()) {
+      setFormError("First and last name are required.");
       return;
     }
+
+    // Only send fields the user actually filled — the backend rejects empty
+    // strings where it expects a date, an email or a UUID.
+    const body: CreateStudentBody = {
+      studentNumber,
+      firstName: form.firstName.trim(),
+      lastName: form.lastName.trim(),
+      ...(form.dateOfBirth ? { dateOfBirth: form.dateOfBirth } : {}),
+      ...(form.gender ? { gender: form.gender as CreateStudentBody["gender"] } : {}),
+      ...(form.personalEmail.trim() ? { personalEmail: form.personalEmail.trim() } : {}),
+      ...(form.contactDetails.trim() ? { contactDetails: form.contactDetails.trim() } : {}),
+      ...(form.guardianName.trim() ? { guardianName: form.guardianName.trim() } : {}),
+      ...(form.guardianContact.trim() ? { guardianContact: form.guardianContact.trim() } : {}),
+      ...(form.bloodGroup ? { bloodGroup: form.bloodGroup as CreateStudentBody["bloodGroup"] } : {}),
+      ...(form.enrollmentDate ? { enrollmentDate: form.enrollmentDate } : {}),
+      ...(form.status ? { status: form.status as CreateStudentBody["status"] } : {}),
+      ...(form.departmentId ? { departmentId: form.departmentId } : {}),
+    };
+
     setFormError(null);
-    const yearPrefix = academicYear.slice(0, 4);
-    const randomSuffix = Math.floor(100 + Math.random() * 900);
-    setAssignedId(`STU-${yearPrefix}-${randomSuffix}`);
+    createMutation.mutate(body);
   }
+
+  // ── Success view ──────────────────────────────────────────────────────────
+
+  if (created) {
+    return (
+      <div>
+        <PageHeader
+          breadcrumb={[
+            { label: "Dashboard", href: "/student-affairs" },
+            { label: "Enrollment" },
+          ]}
+          title="Student Enrolled"
+          description="The record has been created and is now searchable in the directory."
+        />
+        <div className="mx-auto max-w-xl rounded-2xl border border-stone-200 bg-white p-8 text-center">
+          <span className="mx-auto flex h-16 w-16 items-center justify-center rounded-2xl bg-emerald-50 text-emerald-600">
+            <CheckCircleIcon className="h-8 w-8" />
+          </span>
+          <h2 className="mt-5 text-xl font-bold text-stone-900">
+            {created.firstName} {created.lastName}
+          </h2>
+          <p className="mt-1 text-sm text-stone-500">
+            {created.department?.name ?? "No department"} ·{" "}
+            {created.status.toLowerCase()}
+          </p>
+
+          <dl className="mt-6 rounded-xl bg-stone-50 p-5 text-left text-sm">
+            <div className="flex items-center justify-between">
+              <dt className="text-stone-500">Student number</dt>
+              <dd className="font-mono font-bold text-rose-700">
+                {created.studentNumber}
+              </dd>
+            </div>
+            <div className="mt-3 flex items-center justify-between">
+              <dt className="text-stone-500">Record ID</dt>
+              <dd className="font-mono text-xs text-stone-500">{created.id}</dd>
+            </div>
+          </dl>
+
+          {(attachDocuments.isPending || attachedCount > 0 || attachError) && (
+            <p
+              className={`mt-4 text-sm ${attachError ? "text-rose-600" : "text-stone-500"}`}
+            >
+              {attachDocuments.isPending
+                ? "Attaching documents…"
+                : attachError
+                  ? attachError
+                  : `${attachedCount} document${attachedCount === 1 ? "" : "s"} attached.`}
+            </p>
+          )}
+
+          <div className="mt-6 flex items-center justify-center gap-3">
+            <button
+              type="button"
+              onClick={() => {
+                setCreated(null);
+                setForm(emptyForm);
+                setPortrait(null);
+                setPendingDocs([]);
+                setAttachedCount(0);
+                setAttachError(null);
+              }}
+              className="rounded-lg border border-stone-300 px-5 py-2.5 text-sm font-semibold text-stone-600 hover:bg-stone-50"
+            >
+              Enroll Another
+            </button>
+            <Link
+              href="/student-affairs"
+              className="rounded-lg bg-rose-800 px-5 py-2.5 text-sm font-semibold text-white hover:bg-rose-900"
+            >
+              Back to Directory
+            </Link>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ── Form ──────────────────────────────────────────────────────────────────
 
   return (
     <div>
@@ -226,350 +354,275 @@ export default function StudentEnrollmentPage() {
           <>
             <button
               type="button"
-              onClick={handleCancel}
+              onClick={() => router.push("/student-affairs")}
               className="rounded-lg border border-stone-300 px-5 py-2.5 text-sm font-semibold text-stone-600 hover:bg-stone-50"
             >
-              Cancel Enrollment
+              Cancel
             </button>
             <button
               type="submit"
               form="enrollment-form"
-              className="rounded-lg bg-rose-800 px-5 py-2.5 text-sm font-semibold text-white hover:bg-rose-900"
+              disabled={createMutation.isPending}
+              className="rounded-lg bg-rose-800 px-5 py-2.5 text-sm font-semibold text-white hover:bg-rose-900 disabled:opacity-60"
             >
-              Save & Assign ID
+              {createMutation.isPending ? "Saving…" : "Create Student Record"}
             </button>
           </>
         }
       />
 
-      <div className="mb-6 flex flex-wrap items-center gap-4 rounded-2xl border border-stone-200 bg-white px-6 py-4">
-        {STEPS.map((step, index) => (
-          <div key={step.id} className="flex items-center gap-4">
-            <div className="flex items-center gap-2.5">
-              <span
-                className={`flex h-7 w-7 items-center justify-center rounded-full text-sm font-bold ${
-                  step.id === currentStep
-                    ? "bg-rose-800 text-white"
-                    : step.id < currentStep
-                      ? "bg-rose-100 text-rose-700"
-                      : "bg-stone-100 text-stone-400"
-                }`}
-              >
-                {step.id}
-              </span>
-              <span
-                className={`text-sm font-semibold ${
-                  step.id === currentStep ? "text-rose-800" : "text-stone-400"
-                }`}
-              >
-                {step.label}
-              </span>
-            </div>
-            {index < STEPS.length - 1 && (
-              <span className="h-px w-10 bg-stone-200" />
-            )}
-          </div>
-        ))}
-      </div>
-
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-[1fr_320px]">
-        <form
-          id="enrollment-form"
-          onSubmit={handleAssignId}
-          noValidate
-          className="space-y-6"
-        >
-          {assignedId && (
-            <div className="flex items-start gap-3 rounded-2xl border border-emerald-200 bg-emerald-50 p-5">
-              <CheckCircleIcon className="mt-0.5 h-5 w-5 shrink-0 text-emerald-600" />
-              <div>
-                <p className="font-semibold text-emerald-800">
-                  Enrollment saved. Student ID {assignedId} has been assigned.
-                </p>
-                <Link
-                  href="/student-affairs"
-                  className="mt-1 inline-block text-sm font-medium text-emerald-700 hover:underline"
-                >
-                  Back to Dashboard
-                </Link>
-              </div>
-            </div>
-          )}
-
-          {formError && (
-            <p className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-medium text-rose-700">
-              {formError}
-            </p>
-          )}
-
+        <form id="enrollment-form" onSubmit={handleSubmit} noValidate className="space-y-6">
           <section className="rounded-2xl border border-stone-200 bg-white p-8">
-            <h2 className="mb-6 flex items-center gap-2 text-xl font-bold text-stone-900">
-              <UserIcon className="h-5 w-5 text-rose-700" />
-              Personal Information
-            </h2>
+            <div className="mb-6 flex items-center gap-3">
+              <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-rose-50 text-rose-700">
+                <UserIcon className="h-5 w-5" />
+              </span>
+              <h2 className="text-xl font-bold text-stone-900">Personal Details</h2>
+            </div>
+
             <div className="grid grid-cols-1 gap-x-6 gap-y-5 sm:grid-cols-2">
               <TextField
                 id="firstName"
                 label="First Name"
-                placeholder="e.g. Jonathan"
-                value={firstName}
-                onChange={setFirstName}
+                placeholder="e.g. Sophea"
+                value={form.firstName}
+                onChange={set("firstName")}
                 required
               />
               <TextField
                 id="lastName"
                 label="Last Name"
-                placeholder="e.g. Doe"
-                value={lastName}
-                onChange={setLastName}
+                placeholder="e.g. Sok"
+                value={form.lastName}
+                onChange={set("lastName")}
                 required
               />
               <TextField
-                id="dob"
+                id="dateOfBirth"
                 label="Date of Birth"
                 type="date"
-                value={dob}
-                onChange={setDob}
-                required
+                value={form.dateOfBirth}
+                onChange={set("dateOfBirth")}
+                max={new Date().toISOString().slice(0, 10)}
               />
               <SelectField
                 id="gender"
                 label="Gender"
-                value={gender}
-                onChange={setGender}
+                value={form.gender}
+                onChange={set("gender")}
                 options={GENDER_OPTIONS}
-                placeholder="Select Gender"
+                placeholder="Select gender"
               />
-              <div className="sm:col-span-2">
-                <TextField
-                  id="email"
-                  label="Personal Email Address"
-                  type="email"
-                  placeholder="j.doe@example.com"
-                  value={email}
-                  onChange={setEmail}
-                  required
-                />
-              </div>
               <TextField
-                id="mobile"
+                id="personalEmail"
+                label="Personal Email"
+                type="email"
+                placeholder="sophea.sok@example.com"
+                value={form.personalEmail}
+                onChange={set("personalEmail")}
+              />
+              <TextField
+                id="contactDetails"
                 label="Mobile Number"
-                type="tel"
-                placeholder="+1 (555) 000-0000"
-                value={mobile}
-                onChange={setMobile}
+                placeholder="+855 12 345 678"
+                value={form.contactDetails}
+                onChange={set("contactDetails")}
+              />
+              <TextField
+                id="guardianName"
+                label="Guardian Name"
+                placeholder="e.g. Dara Sok"
+                value={form.guardianName}
+                onChange={set("guardianName")}
+              />
+              <TextField
+                id="guardianContact"
+                label="Guardian Contact"
+                placeholder="+855 12 987 654"
+                value={form.guardianContact}
+                onChange={set("guardianContact")}
               />
               <SelectField
                 id="bloodGroup"
                 label="Blood Group"
-                value={bloodGroup}
-                onChange={setBloodGroup}
+                value={form.bloodGroup}
+                onChange={set("bloodGroup")}
                 options={BLOOD_GROUP_OPTIONS}
-                placeholder="Select Blood Type"
+                placeholder="Select blood type"
               />
             </div>
           </section>
 
           <section className="rounded-2xl border border-stone-200 bg-white p-8">
-            <h2 className="mb-6 flex items-center gap-2 text-xl font-bold text-stone-900">
-              <GraduationCapIcon className="h-5 w-5 text-rose-700" />
-              Academic Enrollment Details
-            </h2>
+            <div className="mb-6 flex items-center gap-3">
+              <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-rose-50 text-rose-700">
+                <GraduationCapIcon className="h-5 w-5" />
+              </span>
+              <h2 className="text-xl font-bold text-stone-900">Academic Placement</h2>
+            </div>
+
             <div className="grid grid-cols-1 gap-x-6 gap-y-5 sm:grid-cols-2">
               <SelectField
-                id="academicYear"
-                label="Academic Year"
-                value={academicYear}
-                onChange={setAcademicYear}
-                options={ACADEMIC_YEAR_OPTIONS}
-                placeholder="Select Academic Year"
+                id="departmentId"
+                label="Department"
+                value={form.departmentId}
+                onChange={set("departmentId")}
+                options={departments.map((d) => ({ value: d.id, label: d.name }))}
+                placeholder={
+                  departmentsQuery.isLoading ? "Loading…" : "Select department"
+                }
+                disabled={departmentsQuery.isLoading}
               />
               <SelectField
-                id="department"
-                label="Department / Program"
-                value={department}
-                onChange={setDepartment}
-                options={DEPARTMENT_OPTIONS}
-                placeholder="Select Department"
+                id="status"
+                label="Enrollment Status"
+                value={form.status}
+                onChange={set("status")}
+                options={STUDENT_STATUS_OPTIONS}
+                placeholder="Select status"
+              />
+              <TextField
+                id="enrollmentDate"
+                label="Enrollment Date"
+                type="date"
+                value={form.enrollmentDate}
+                onChange={set("enrollmentDate")}
+              />
+              <TextField
+                id="studentNumber"
+                label="Student Number"
+                placeholder={suggestedNumber}
+                value={form.studentNumber}
+                onChange={set("studentNumber")}
               />
             </div>
+
+            <p className="mt-4 flex items-start gap-2 rounded-lg bg-sky-50 p-3 text-xs text-sky-800">
+              <InfoIcon className="mt-0.5 h-4 w-4 shrink-0" />
+              Leave the student number blank to use{" "}
+              <span className="font-mono font-semibold">{suggestedNumber}</span>. It
+              must be unique — the backend rejects duplicates.
+            </p>
+
+            {formError && (
+              <p className="mt-4 text-sm font-medium text-rose-600">{formError}</p>
+            )}
           </section>
         </form>
 
         <aside className="space-y-6">
-          <div className="rounded-2xl border border-stone-200 bg-white p-6 text-center">
-            <input
-              ref={portraitInputRef}
-              type="file"
-              accept="image/png,image/jpeg"
-              className="hidden"
-              onChange={handlePortraitChange}
-            />
-            <button
-              type="button"
-              onClick={() => portraitInputRef.current?.click()}
-              className="mx-auto flex h-40 w-40 items-center justify-center overflow-hidden rounded-2xl border-2 border-dashed border-rose-200 bg-rose-50/50 text-rose-300 hover:border-rose-300"
-            >
-              {portraitPreview ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img
-                  src={portraitPreview}
-                  alt="Student portrait preview"
-                  className="h-full w-full object-cover"
-                />
-              ) : (
-                <CameraIcon className="h-8 w-8" />
-              )}
-            </button>
-            <p className="mt-4 font-semibold text-stone-800">
-              Student Portrait
+          <div className="rounded-2xl border border-stone-200 bg-white p-6">
+            <h3 className="text-sm font-bold uppercase tracking-wide text-stone-500">
+              Program &amp; Major
+            </h3>
+            <p className="mt-3 text-sm text-stone-500">
+              Majors and semesters are assigned by Academic Affairs once the record
+              exists. Create the student here first.
             </p>
-            <p className="mt-1 text-xs text-stone-500">
-              JPG or PNG, max 5MB. Must be recent and high-resolution.
-            </p>
-            {portraitError && (
-              <p className="mt-2 text-xs font-medium text-rose-600">
-                {portraitError}
-              </p>
-            )}
           </div>
 
-          <div
-            className={`rounded-2xl border-2 border-dashed p-6 text-center transition-colors ${
-              isDraggingDocs
-                ? "border-rose-400 bg-rose-100/60"
-                : "border-rose-200 bg-rose-50/40"
-            }`}
-            onDragOver={(e) => {
-              e.preventDefault();
-              setIsDraggingDocs(true);
-            }}
-            onDragLeave={() => setIsDraggingDocs(false)}
-            onDrop={(e) => {
-              e.preventDefault();
-              setIsDraggingDocs(false);
-              addDocuments(e.dataTransfer.files);
-            }}
-          >
-            <span className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-rose-100 text-rose-600">
-              <UploadCloudIcon className="h-7 w-7" />
-            </span>
-            <p className="mt-4 font-semibold text-stone-800">
-              Supporting Documents
+          <div className="rounded-2xl border border-stone-200 bg-white p-6">
+            <h3 className="text-sm font-bold uppercase tracking-wide text-stone-500">
+              Student Portrait
+            </h3>
+            {portrait ? (
+              <div className="mt-4">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={portrait.url}
+                  alt="Student portrait"
+                  className="mx-auto h-40 w-40 rounded-2xl object-cover"
+                />
+                <div className="mt-3">
+                  <UploadedFileRow
+                    name="Portrait"
+                    url={portrait.url}
+                    size={portrait.size}
+                    onRemove={() => setPortrait(null)}
+                  />
+                </div>
+              </div>
+            ) : (
+              <div className="mt-4">
+                <FileDropzone
+                  compact
+                  accept={IMAGE_UPLOAD_TYPES}
+                  acceptLabel="JPG, PNG, WEBP or GIF, up to 5 MB"
+                  onUploaded={(file) => setPortrait(file)}
+                />
+              </div>
+            )}
+            <p className="mt-3 flex items-start gap-2 text-xs text-stone-500">
+              <CameraIcon className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+              Stored on upload. The student record does not carry a portrait
+              field yet, so this is kept with the record&apos;s documents.
             </p>
-            <p className="mt-1 text-xs text-stone-500">
-              Drag and drop birth certificate, transcripts, and ID proof here
-              for bulk processing.
-            </p>
-            <input
-              ref={documentInputRef}
-              type="file"
-              multiple
-              className="hidden"
-              onChange={(e) => addDocuments(e.target.files)}
-            />
-            <button
-              type="button"
-              onClick={() => documentInputRef.current?.click()}
-              className="mt-4 inline-flex items-center gap-2 rounded-lg border border-stone-300 bg-white px-4 py-2 text-sm font-semibold text-stone-700 hover:bg-stone-50"
-            >
-              <UploadCloudIcon className="h-4 w-4" />
-              Browse Files
-            </button>
+          </div>
 
-            {documents.length > 0 && (
-              <ul className="mt-4 space-y-2 text-left">
-                {documents.map((doc) => (
-                  <li
-                    key={doc.id}
-                    className="flex items-center justify-between gap-2 rounded-lg border border-stone-200 bg-white px-3 py-2"
-                  >
-                    <span className="flex min-w-0 items-center gap-2 text-sm text-stone-700">
-                      <FileTextIcon className="h-4 w-4 shrink-0 text-rose-600" />
-                      <span className="truncate">{doc.name}</span>
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => removeDocument(doc.id)}
-                      aria-label={`Remove ${doc.name}`}
-                      className="shrink-0 text-stone-400 hover:text-rose-600"
-                    >
-                      <XIcon className="h-4 w-4" />
-                    </button>
+          <div className="rounded-2xl border border-stone-200 bg-white p-6">
+            <h3 className="text-sm font-bold uppercase tracking-wide text-stone-500">
+              Supporting Documents
+            </h3>
+            <p className="mt-1 text-xs text-stone-500">
+              Uploaded now, attached to the record once it is created.
+            </p>
+
+            <label
+              htmlFor="doc-type"
+              className="mt-4 mb-1.5 block text-xs font-bold uppercase tracking-wide text-stone-500"
+            >
+              Document Type
+            </label>
+            <select
+              id="doc-type"
+              value={docType}
+              onChange={(e) => setDocType(e.target.value as DocumentTypeDTO)}
+              className="w-full rounded-lg border border-stone-200 bg-white px-4 py-2.5 text-sm outline-none focus:border-rose-400"
+            >
+              <option value="ID_CARD">ID Card</option>
+              <option value="TRANSCRIPT">Transcript</option>
+              <option value="CERTIFICATE">Certificate</option>
+              <option value="OTHER">Other</option>
+            </select>
+
+            <div className="mt-3">
+              <FileDropzone
+                compact
+                accept={DOCUMENT_UPLOAD_TYPES}
+                acceptLabel="PDF, CSV or spreadsheet, up to 5 MB"
+                onUploaded={(file, original) =>
+                  setPendingDocs((docs) => [
+                    ...docs,
+                    {
+                      name: original.name,
+                      url: file.url,
+                      size: file.size,
+                      documentType: docType,
+                    },
+                  ])
+                }
+              />
+            </div>
+
+            {pendingDocs.length > 0 && (
+              <ul className="mt-3 space-y-2">
+                {pendingDocs.map((doc, i) => (
+                  <li key={doc.url}>
+                    <UploadedFileRow
+                      name={`${doc.name} · ${doc.documentType.replace("_", " ").toLowerCase()}`}
+                      url={doc.url}
+                      size={doc.size}
+                      onRemove={() =>
+                        setPendingDocs((docs) => docs.filter((_, j) => j !== i))
+                      }
+                    />
                   </li>
                 ))}
               </ul>
             )}
           </div>
-
-          <div className="overflow-hidden rounded-2xl border border-stone-200">
-            <div className="bg-rose-800 px-5 py-3">
-              <h3 className="text-sm font-bold uppercase tracking-wide text-white">
-                Enrollment Status
-              </h3>
-            </div>
-            <div className="space-y-3 bg-white p-5">
-              <div className="flex items-center justify-between text-sm">
-                <span className="text-stone-500">Registration Fee</span>
-                <span className="font-semibold text-emerald-600">
-                  Paid - $150.00
-                </span>
-              </div>
-              <div className="flex items-center justify-between text-sm">
-                <span className="text-stone-500">Documents Verified</span>
-                <span
-                  className={`font-semibold ${
-                    documents.length >= REQUIRED_DOC_COUNT
-                      ? "text-emerald-600"
-                      : "text-amber-600"
-                  }`}
-                >
-                  {documentsVerifiedLabel}
-                </span>
-              </div>
-              <div className="flex items-center justify-between text-sm">
-                <span className="text-stone-500">System Assigned ID</span>
-                <span
-                  className={`font-semibold ${
-                    assignedId ? "text-emerald-600" : "text-stone-400"
-                  }`}
-                >
-                  {assignedId ?? "Not yet generated"}
-                </span>
-              </div>
-              <div className="mt-2 flex items-start gap-2 rounded-xl bg-rose-50 p-3 text-xs text-rose-700">
-                <InfoIcon className="mt-0.5 h-4 w-4 shrink-0" />
-                <span>
-                  {assignedId
-                    ? "Enrollment finalized. You can safely leave this page."
-                    : "Enrollment will be finalized once the 'Save & Assign ID' button is pressed."}
-                </span>
-              </div>
-            </div>
-          </div>
         </aside>
-      </div>
-
-      <div className="mt-6 flex flex-wrap items-center justify-between gap-4 border-t border-stone-200 pt-6">
-        <p className="text-sm text-stone-500">
-          {draftMessage ?? "Form auto-saves every 30 seconds."}
-        </p>
-        <div className="flex items-center gap-3">
-          <button
-            type="button"
-            onClick={handleSaveDraft}
-            className="rounded-lg bg-rose-100 px-5 py-2.5 text-sm font-semibold text-rose-800 hover:bg-rose-200"
-          >
-            Save Draft
-          </button>
-          <button
-            type="submit"
-            form="enrollment-form"
-            className="rounded-lg bg-rose-800 px-5 py-2.5 text-sm font-semibold text-white hover:bg-rose-900"
-          >
-            Save & Assign ID
-          </button>
-        </div>
       </div>
     </div>
   );

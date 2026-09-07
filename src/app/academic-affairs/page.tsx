@@ -1,130 +1,248 @@
 "use client";
 
 import Link from "next/link";
-import { useRef, useState } from "react";
+import { useMemo, useState } from "react";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { PageHeader } from "@/components/page-header";
 import { StatusBadge, type StatusTone } from "@/components/status-badge";
+import { LoadingRow, ErrorRow, EmptyRow } from "@/components/query-states";
 import {
   AlertTriangleIcon,
   CalendarXIcon,
   CheckCircleIcon,
   ChevronDownIcon,
   DownloadIcon,
-  FileTextIcon,
-  FunnelIcon,
   GraduationCapIcon,
   UploadCloudIcon,
-  XIcon,
 } from "@/components/icons";
+import { apiFetch, ApiRequestError } from "@/lib/api/client";
+import { useApiQuery } from "@/lib/api/hooks";
+import type {
+  AcademicSummaryDTO,
+  ClassDTO,
+  DeadlineDTO,
+  MajorDTO,
+  ProgramDTO,
+  SemesterDTO,
+} from "@/lib/api/types";
 import {
-  MAJOR_OPTIONS,
-  PROGRAM_OPTIONS,
-  registrationMonitoring,
-  upcomingDeadlines,
+  fromApiClass,
+  fromApiDeadline,
+  fromApiSemester,
   type RegistrationMonitorRow,
 } from "@/lib/academic-affairs/data";
 
-const ACCEPTED_IMPORT_TYPES = [
-  "application/vnd.ms-excel",
-  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-  "text/csv",
-];
+const AAO_KEY = ["academic-affairs"] as const;
+const PROGRAMS_KEY = [...AAO_KEY, "programs"] as const;
+const MAJORS_KEY = [...AAO_KEY, "majors"] as const;
+const SEMESTERS_KEY = [...AAO_KEY, "semesters"] as const;
+const CLASSES_KEY = [...AAO_KEY, "classes"] as const;
+const SUMMARY_KEY = [...AAO_KEY, "summary"] as const;
+
+const PAGE_SIZE = 10;
+const LOOKUP_LIMIT = 100;
 
 const statusTone: Record<RegistrationMonitorRow["status"], StatusTone> = {
   OPEN: "green",
   FULL: "rose",
 };
 
-type Semester = "First" | "Second";
+function errorMessage(err: unknown, fallback: string): string {
+  if (err instanceof ApiRequestError) {
+    const firstFieldError = err.errors ? Object.values(err.errors).flat()[0] : null;
+    return firstFieldError ?? err.message;
+  }
+  return fallback;
+}
 
-function SemesterOption({
-  label,
-  selected,
-  onSelect,
-}: {
-  label: string;
-  selected: boolean;
-  onSelect: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onSelect}
-      className={`flex items-center gap-3 rounded-lg border px-4 py-3 text-left text-sm font-semibold transition-colors ${
-        selected
-          ? "border-rose-400 bg-rose-50 text-rose-800"
-          : "border-stone-200 text-stone-700 hover:border-stone-300"
-      }`}
-    >
-      <span
-        className={`flex h-4 w-4 shrink-0 items-center justify-center rounded-full border-2 ${
-          selected ? "border-rose-700" : "border-stone-300"
-        }`}
-      >
-        {selected && <span className="h-2 w-2 rounded-full bg-rose-700" />}
-      </span>
-      {label}
-    </button>
-  );
+function downloadRegistrationCsv(rows: RegistrationMonitorRow[]) {
+  const header = ["Course Code", "Course Title", "Instructor", "Enrolled", "Capacity", "Status"];
+  const body = rows.map((r) => [
+    r.code,
+    r.title,
+    r.instructor,
+    String(r.enrolled),
+    String(r.capacity),
+    r.status,
+  ]);
+  const csv = [header, ...body].map((r) => r.map((c) => `"${c}"`).join(",")).join("\n");
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = "registration-monitoring.csv";
+  link.click();
+  URL.revokeObjectURL(url);
 }
 
 export default function AcademicAffairsDashboard() {
-  const [program, setProgram] = useState(PROGRAM_OPTIONS[0]);
-  const [major, setMajor] = useState(MAJOR_OPTIONS[0]);
-  const [semester, setSemester] = useState<Semester | null>(null);
-  const [enrollmentStart, setEnrollmentStart] = useState("");
-  const [enrollmentEnd, setEnrollmentEnd] = useState("");
-  const [savedMessage, setSavedMessage] = useState<string | null>(null);
+  const queryClient = useQueryClient();
 
-  const [showBulkUploadModal, setShowBulkUploadModal] = useState(false);
-  const [uploadFile, setUploadFile] = useState<File | null>(null);
-  const [isDraggingUpload, setIsDraggingUpload] = useState(false);
-  const [uploadError, setUploadError] = useState<string | null>(null);
+  const [page, setPage] = useState(1);
   const [toast, setToast] = useState<string | null>(null);
-  const uploadInputRef = useRef<HTMLInputElement>(null);
+  const [formError, setFormError] = useState<string | null>(null);
 
-  function openBulkUploadModal() {
-    setUploadFile(null);
-    setUploadError(null);
-    setShowBulkUploadModal(true);
-  }
+  // Program Setup form state. Ids, not labels — every one of these is a FK.
+  // Only the user's own choices are stored; defaults are derived below so no
+  // effect has to write them back into state.
+  const [programId, setProgramId] = useState("");
+  const [pickedMajorId, setPickedMajorId] = useState("");
+  const [pickedSemesterId, setPickedSemesterId] = useState("");
+  /** Non-null once the user edits the session window; null means "follow the semester". */
+  const [windowDraft, setWindowDraft] = useState<{ start: string; end: string } | null>(
+    null,
+  );
 
-  function selectUploadFile(file: File | undefined | null) {
-    if (!file) return;
-    const isAcceptedType =
-      ACCEPTED_IMPORT_TYPES.includes(file.type) || /\.(xlsx|xls|csv)$/i.test(file.name);
-    if (!isAcceptedType) {
-      setUploadError("Please upload an Excel (.xlsx, .xls) or CSV file.");
-      return;
-    }
-    setUploadError(null);
-    setUploadFile(file);
-  }
-
-  function handleSaveBulkUpload() {
-    if (!uploadFile) {
-      setUploadError("Please select a file to upload.");
-      return;
-    }
-    setShowBulkUploadModal(false);
-    setToast(`"${uploadFile.name}" has been uploaded and is being processed.`);
-    setUploadFile(null);
+  function showToast(message: string) {
+    setToast(message);
     window.setTimeout(() => setToast(null), 4000);
   }
 
-  function handleDiscard() {
-    setProgram(PROGRAM_OPTIONS[0]);
-    setMajor(MAJOR_OPTIONS[0]);
-    setSemester(null);
-    setEnrollmentStart("");
-    setEnrollmentEnd("");
-    setSavedMessage(null);
-  }
+  // ── Queries ───────────────────────────────────────────────────────────────
+
+  const programsQuery = useApiQuery<ProgramDTO[]>(
+    [...PROGRAMS_KEY, { limit: LOOKUP_LIMIT }],
+    "/academic-affairs/programs",
+    { query: { limit: LOOKUP_LIMIT } },
+  );
+
+  // Majors belong to a program, so the picker narrows once one is chosen.
+  const majorsQuery = useApiQuery<MajorDTO[]>(
+    [...MAJORS_KEY, { programId }],
+    "/academic-affairs/majors",
+    { query: { limit: LOOKUP_LIMIT, programId: programId || undefined } },
+  );
+
+  const semestersQuery = useApiQuery<SemesterDTO[]>(
+    [...SEMESTERS_KEY, { limit: LOOKUP_LIMIT }],
+    "/academic-affairs/semesters",
+    { query: { limit: LOOKUP_LIMIT } },
+  );
+
+  const summaryQuery = useApiQuery<AcademicSummaryDTO>(
+    [...SUMMARY_KEY, { pickedSemesterId }],
+    "/academic-affairs/summary",
+    { query: { semesterId: pickedSemesterId || undefined } },
+  );
+
+  // The backend falls back to the most recent semester when none is named, so
+  // its answer doubles as the page's default selection.
+  const semesterId = pickedSemesterId || summaryQuery.data?.data.semesterId || "";
+
+  const deadlinesQuery = useApiQuery<DeadlineDTO[]>(
+    [...AAO_KEY, "deadlines", { semesterId: pickedSemesterId }],
+    "/academic-affairs/deadlines",
+    { query: { semesterId: pickedSemesterId || undefined, withinDays: 90, limit: 6 } },
+  );
+
+  const classesQuery = useApiQuery<ClassDTO[]>(
+    [...CLASSES_KEY, { page, semesterId }],
+    "/academic-affairs/classes",
+    {
+      query: {
+        page,
+        limit: PAGE_SIZE,
+        semesterId: semesterId || undefined,
+      },
+      placeholderData: (prev) => prev,
+    },
+  );
+
+  const programs = programsQuery.data?.data ?? [];
+  const majors = majorsQuery.data?.data ?? [];
+  const semesters = useMemo(
+    () => (semestersQuery.data?.data ?? []).map(fromApiSemester),
+    [semestersQuery.data],
+  );
+  const summary = summaryQuery.data?.data;
+
+  const deadlines = useMemo(
+    () => (deadlinesQuery.data?.data ?? []).map(fromApiDeadline),
+    [deadlinesQuery.data],
+  );
+
+  const monitorRows = useMemo(
+    () => (classesQuery.data?.data ?? []).map(fromApiClass),
+    [classesQuery.data],
+  );
+
+  const total = classesQuery.data?.pagination?.total ?? 0;
+  const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE));
+
+  const selectedSemester = semesters.find((s) => s.id === semesterId);
+
+  // The window inputs show the semester's own dates until the user edits them.
+  const enrollmentStart = windowDraft?.start ?? selectedSemester?.startDate ?? "";
+  const enrollmentEnd = windowDraft?.end ?? selectedSemester?.endDate ?? "";
+
+  // A major picked under one program must not survive a switch to another.
+  const majorId = majors.some((m) => m.id === pickedMajorId) ? pickedMajorId : "";
+
+  // ── Mutations ─────────────────────────────────────────────────────────────
+
+  const updateSemesterMutation = useMutation({
+    mutationFn: (body: { startDate: string; endDate: string }) =>
+      apiFetch<SemesterDTO>(`/academic-affairs/semesters/${semesterId}`, {
+        method: "PATCH",
+        body,
+      }),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: SEMESTERS_KEY });
+      await queryClient.invalidateQueries({ queryKey: SUMMARY_KEY });
+      setWindowDraft(null);
+      setFormError(null);
+      showToast("Academic structure updated.");
+    },
+    onError: (err) => setFormError(errorMessage(err, "Update failed.")),
+  });
+
+  const registrationMutation = useMutation({
+    mutationFn: (registrationOpen: boolean) =>
+      apiFetch<SemesterDTO>(
+        `/academic-affairs/semesters/${semesterId}/registration`,
+        { method: "PATCH", body: { registrationOpen } },
+      ),
+    onSuccess: async (_res, registrationOpen) => {
+      await queryClient.invalidateQueries({ queryKey: SEMESTERS_KEY });
+      await queryClient.invalidateQueries({ queryKey: SUMMARY_KEY });
+      setFormError(null);
+      showToast(
+        registrationOpen
+          ? "Course registration is now open."
+          : "Course registration is now closed.",
+      );
+    },
+    onError: (err) => setFormError(errorMessage(err, "Could not change the registration window.")),
+  });
 
   function handleUpdate() {
-    setSavedMessage("Academic structure updated for 2024/25.");
-    window.setTimeout(() => setSavedMessage(null), 3000);
+    if (!semesterId) {
+      setFormError("Select a semester first.");
+      return;
+    }
+    if (!enrollmentStart || !enrollmentEnd) {
+      setFormError("Set both a start and an end date for the session window.");
+      return;
+    }
+    if (enrollmentStart >= enrollmentEnd) {
+      setFormError("The start date must fall before the end date.");
+      return;
+    }
+    updateSemesterMutation.mutate({
+      startDate: enrollmentStart,
+      endDate: enrollmentEnd,
+    });
   }
+
+  function handleDiscard() {
+    setProgramId("");
+    setPickedMajorId("");
+    setWindowDraft(null);
+    setFormError(null);
+  }
+
+  const lookupsLoading =
+    programsQuery.isLoading || semestersQuery.isLoading || summaryQuery.isLoading;
 
   return (
     <div>
@@ -132,24 +250,17 @@ export default function AcademicAffairsDashboard() {
         title="Academic Affairs"
         description="Configure programs, assign structures, and manage session timelines."
         actions={
-          <>
-            <button
-              type="button"
-              onClick={openBulkUploadModal}
-              className="flex items-center gap-2 rounded-lg border border-stone-300 px-5 py-2.5 text-sm font-semibold text-stone-600 hover:bg-stone-50"
-            >
-              <UploadCloudIcon className="h-4 w-4" />
-              Bulk Upload
-            </button>
-            <button
-              type="button"
-              onClick={handleUpdate}
-              className="flex items-center gap-2 rounded-lg bg-rose-800 px-5 py-2.5 text-sm font-semibold text-white hover:bg-rose-900"
-            >
-              <UploadCloudIcon className="h-4 w-4 -rotate-90" />
-              Publish Schedule
-            </button>
-          </>
+          <button
+            type="button"
+            onClick={() => registrationMutation.mutate(!selectedSemester?.registrationOpen)}
+            disabled={!semesterId || registrationMutation.isPending}
+            className="flex items-center gap-2 rounded-lg bg-rose-800 px-5 py-2.5 text-sm font-semibold text-white hover:bg-rose-900 disabled:opacity-60"
+          >
+            <UploadCloudIcon className="h-4 w-4 -rotate-90" />
+            {selectedSemester?.registrationOpen
+              ? "Close Registration"
+              : "Open Registration"}
+          </button>
         }
       />
 
@@ -160,42 +271,94 @@ export default function AcademicAffairsDashboard() {
               <h2 className="text-xl font-bold text-stone-900">
                 Academic Program Setup
               </h2>
-              <StatusBadge label="Active Session: 2024/25" tone="rose" />
+              {selectedSemester ? (
+                <StatusBadge
+                  label={`Active: ${selectedSemester.label}`}
+                  tone={selectedSemester.registrationOpen ? "green" : "amber"}
+                />
+              ) : (
+                <StatusBadge label="No semester selected" tone="amber" />
+              )}
             </div>
 
             <div className="grid grid-cols-1 gap-x-6 gap-y-5 sm:grid-cols-2">
               <div>
-                <label className="mb-2 block text-xs font-bold uppercase tracking-wide text-stone-500">
-                  Assign Program by Year
+                <label
+                  htmlFor="aao-program"
+                  className="mb-2 block text-xs font-bold uppercase tracking-wide text-stone-500"
+                >
+                  Program
                 </label>
                 <div className="relative">
                   <select
-                    value={program}
-                    onChange={(e) => setProgram(e.target.value)}
-                    className="w-full appearance-none rounded-lg border border-stone-200 bg-white px-4 py-3 text-sm text-stone-900 outline-none focus:border-rose-400 focus:ring-2 focus:ring-rose-100"
+                    id="aao-program"
+                    value={programId}
+                    onChange={(e) => setProgramId(e.target.value)}
+                    disabled={programsQuery.isLoading}
+                    className="w-full appearance-none rounded-lg border border-stone-200 bg-white px-4 py-3 text-sm text-stone-900 outline-none focus:border-rose-400 focus:ring-2 focus:ring-rose-100 disabled:bg-stone-50"
                   >
-                    {PROGRAM_OPTIONS.map((option) => (
-                      <option key={option} value={option}>
-                        {option}
+                    <option value="">
+                      {programsQuery.isLoading ? "Loading…" : "All programs"}
+                    </option>
+                    {programs.map((option) => (
+                      <option key={option.id} value={option.id}>
+                        {option.name} · {option.department.name}
                       </option>
                     ))}
                   </select>
                   <ChevronDownIcon className="pointer-events-none absolute right-4 top-1/2 h-4 w-4 -translate-y-1/2 text-stone-400" />
                 </div>
               </div>
+
               <div>
-                <label className="mb-2 block text-xs font-bold uppercase tracking-wide text-stone-500">
-                  Assign Major/Specialization
+                <label
+                  htmlFor="aao-major"
+                  className="mb-2 block text-xs font-bold uppercase tracking-wide text-stone-500"
+                >
+                  Major / Specialization
                 </label>
                 <div className="relative">
                   <select
-                    value={major}
-                    onChange={(e) => setMajor(e.target.value)}
-                    className="w-full appearance-none rounded-lg border border-stone-200 bg-white px-4 py-3 text-sm text-stone-900 outline-none focus:border-rose-400 focus:ring-2 focus:ring-rose-100"
+                    id="aao-major"
+                    value={majorId}
+                    onChange={(e) => setPickedMajorId(e.target.value)}
+                    disabled={majorsQuery.isLoading}
+                    className="w-full appearance-none rounded-lg border border-stone-200 bg-white px-4 py-3 text-sm text-stone-900 outline-none focus:border-rose-400 focus:ring-2 focus:ring-rose-100 disabled:bg-stone-50"
                   >
-                    {MAJOR_OPTIONS.map((option) => (
-                      <option key={option} value={option}>
-                        {option}
+                    <option value="">
+                      {majorsQuery.isLoading ? "Loading…" : "All majors"}
+                    </option>
+                    {majors.map((option) => (
+                      <option key={option.id} value={option.id}>
+                        {option.name}
+                      </option>
+                    ))}
+                  </select>
+                  <ChevronDownIcon className="pointer-events-none absolute right-4 top-1/2 h-4 w-4 -translate-y-1/2 text-stone-400" />
+                </div>
+              </div>
+
+              <div>
+                <label
+                  htmlFor="aao-semester"
+                  className="mb-2 block text-xs font-bold uppercase tracking-wide text-stone-500"
+                >
+                  Semester
+                </label>
+                <div className="relative">
+                  <select
+                    id="aao-semester"
+                    value={semesterId}
+                    onChange={(e) => setPickedSemesterId(e.target.value)}
+                    disabled={semestersQuery.isLoading}
+                    className="w-full appearance-none rounded-lg border border-stone-200 bg-white px-4 py-3 text-sm text-stone-900 outline-none focus:border-rose-400 focus:ring-2 focus:ring-rose-100 disabled:bg-stone-50"
+                  >
+                    <option value="">
+                      {semestersQuery.isLoading ? "Loading…" : "Select a semester"}
+                    </option>
+                    {semesters.map((option) => (
+                      <option key={option.id} value={option.id}>
+                        {option.label}
                       </option>
                     ))}
                   </select>
@@ -205,45 +368,35 @@ export default function AcademicAffairsDashboard() {
 
               <div>
                 <label className="mb-2 block text-xs font-bold uppercase tracking-wide text-stone-500">
-                  Assign Semester
-                </label>
-                <div className="grid grid-cols-2 gap-3">
-                  <SemesterOption
-                    label="First Semester"
-                    selected={semester === "First"}
-                    onSelect={() => setSemester("First")}
-                  />
-                  <SemesterOption
-                    label="Second Semester"
-                    selected={semester === "Second"}
-                    onSelect={() => setSemester("Second")}
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="mb-2 block text-xs font-bold uppercase tracking-wide text-stone-500">
-                  Session Enrollment Window
+                  Session Window
                 </label>
                 <div className="grid grid-cols-2 gap-3">
                   <input
                     type="date"
+                    aria-label="Session start date"
                     value={enrollmentStart}
-                    onChange={(e) => setEnrollmentStart(e.target.value)}
-                    className="w-full rounded-lg border border-stone-200 px-4 py-3 text-sm text-stone-900 outline-none focus:border-rose-400 focus:ring-2 focus:ring-rose-100"
+                    onChange={(e) =>
+                      setWindowDraft({ start: e.target.value, end: enrollmentEnd })
+                    }
+                    disabled={!semesterId}
+                    className="w-full rounded-lg border border-stone-200 px-4 py-3 text-sm text-stone-900 outline-none focus:border-rose-400 focus:ring-2 focus:ring-rose-100 disabled:bg-stone-50"
                   />
                   <input
                     type="date"
+                    aria-label="Session end date"
                     value={enrollmentEnd}
-                    onChange={(e) => setEnrollmentEnd(e.target.value)}
-                    className="w-full rounded-lg border border-stone-200 px-4 py-3 text-sm text-stone-900 outline-none focus:border-rose-400 focus:ring-2 focus:ring-rose-100"
+                    onChange={(e) =>
+                      setWindowDraft({ start: enrollmentStart, end: e.target.value })
+                    }
+                    disabled={!semesterId}
+                    className="w-full rounded-lg border border-stone-200 px-4 py-3 text-sm text-stone-900 outline-none focus:border-rose-400 focus:ring-2 focus:ring-rose-100 disabled:bg-stone-50"
                   />
                 </div>
               </div>
             </div>
 
             <div className="mt-6 flex flex-wrap items-center justify-between gap-4 border-t border-stone-200 pt-6">
-              <p className="text-sm text-stone-500">{savedMessage}</p>
+              <p className="text-sm font-medium text-rose-600">{formError}</p>
               <div className="ml-auto flex items-center gap-5">
                 <button
                   type="button"
@@ -255,9 +408,12 @@ export default function AcademicAffairsDashboard() {
                 <button
                   type="button"
                   onClick={handleUpdate}
-                  className="rounded-lg bg-rose-800 px-5 py-2.5 text-sm font-semibold text-white hover:bg-rose-900"
+                  disabled={!semesterId || updateSemesterMutation.isPending}
+                  className="rounded-lg bg-rose-800 px-5 py-2.5 text-sm font-semibold text-white hover:bg-rose-900 disabled:opacity-60"
                 >
-                  Update Academic Structure
+                  {updateSemesterMutation.isPending
+                    ? "Saving…"
+                    : "Update Academic Structure"}
                 </button>
               </div>
             </div>
@@ -268,22 +424,15 @@ export default function AcademicAffairsDashboard() {
               <h2 className="text-xl font-bold text-stone-900">
                 Registration Monitoring
               </h2>
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  aria-label="Filter"
-                  className="rounded-lg border border-stone-200 p-2.5 text-stone-500 hover:bg-stone-50"
-                >
-                  <FunnelIcon className="h-4 w-4" />
-                </button>
-                <button
-                  type="button"
-                  aria-label="Download"
-                  className="rounded-lg border border-stone-200 p-2.5 text-stone-500 hover:bg-stone-50"
-                >
-                  <DownloadIcon className="h-4 w-4" />
-                </button>
-              </div>
+              <button
+                type="button"
+                onClick={() => downloadRegistrationCsv(monitorRows)}
+                disabled={monitorRows.length === 0}
+                className="flex items-center gap-2 rounded-lg border border-stone-200 px-4 py-2 text-sm font-semibold text-stone-600 hover:bg-stone-50 disabled:text-stone-300"
+              >
+                <DownloadIcon className="h-4 w-4" />
+                Export Page
+              </button>
             </div>
             <div className="overflow-x-auto">
               <table className="w-full text-left text-sm">
@@ -297,62 +446,80 @@ export default function AcademicAffairsDashboard() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-stone-100">
-                  {registrationMonitoring.map((row) => (
-                    <tr key={row.id}>
-                      <td className="px-6 py-4 font-bold text-rose-700">
-                        {row.code}
-                      </td>
-                      <td className="px-6 py-4 text-stone-800">
-                        {row.title}
-                      </td>
-                      <td className="px-6 py-4 text-stone-600">
-                        {row.instructor}
-                      </td>
-                      <td className="px-6 py-4">
-                        <div className="flex items-center gap-3">
-                          <div className="h-1.5 w-28 overflow-hidden rounded-full bg-stone-100">
-                            <div
-                              className={`h-full rounded-full ${
-                                row.status === "FULL"
-                                  ? "bg-amber-500"
-                                  : "bg-rose-800"
-                              }`}
-                              style={{
-                                width: `${(row.enrolled / row.capacity) * 100}%`,
-                              }}
-                            />
+                  {classesQuery.isLoading && <LoadingRow colSpan={5} />}
+                  {classesQuery.isError && (
+                    <ErrorRow
+                      colSpan={5}
+                      message={classesQuery.error.message}
+                      onRetry={() => classesQuery.refetch()}
+                    />
+                  )}
+                  {!classesQuery.isLoading &&
+                    !classesQuery.isError &&
+                    monitorRows.map((row) => (
+                      <tr key={row.id}>
+                        <td className="px-6 py-4 font-bold text-rose-700">
+                          {row.code}
+                        </td>
+                        <td className="px-6 py-4 text-stone-800">{row.title}</td>
+                        <td className="px-6 py-4">
+                          <div className="flex items-center gap-2.5">
+                            <span
+                              className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-xs font-bold ${row.instructorColorClassName}`}
+                            >
+                              {row.instructorInitials}
+                            </span>
+                            <span className="text-stone-700">{row.instructor}</span>
                           </div>
-                          <span className="text-stone-500">
-                            {row.enrolled}/{row.capacity}
-                          </span>
-                        </div>
-                      </td>
-                      <td className="px-6 py-4">
-                        <StatusBadge
-                          label={row.status}
-                          tone={statusTone[row.status]}
-                        />
-                      </td>
-                    </tr>
-                  ))}
+                        </td>
+                        <td className="px-6 py-4">
+                          <div className="flex items-center gap-3">
+                            <div className="h-1.5 w-28 overflow-hidden rounded-full bg-stone-100">
+                              <div
+                                className={`h-full rounded-full ${
+                                  row.status === "FULL" ? "bg-amber-500" : "bg-rose-800"
+                                }`}
+                                style={{
+                                  width: `${Math.min(100, (row.enrolled / Math.max(1, row.capacity)) * 100)}%`,
+                                }}
+                              />
+                            </div>
+                            <span className="text-stone-500">
+                              {row.enrolled}/{row.capacity}
+                            </span>
+                          </div>
+                        </td>
+                        <td className="px-6 py-4">
+                          <StatusBadge label={row.status} tone={statusTone[row.status]} />
+                        </td>
+                      </tr>
+                    ))}
+                  {!classesQuery.isLoading &&
+                    !classesQuery.isError &&
+                    monitorRows.length === 0 && (
+                      <EmptyRow colSpan={5} label="No classes scheduled for this semester." />
+                    )}
                 </tbody>
               </table>
             </div>
             <div className="flex items-center justify-between gap-4 border-t border-stone-200 px-6 py-4 text-sm">
               <p className="text-stone-500">
-                Showing {registrationMonitoring.length} of 48 Courses
+                Page {page} of {pageCount} · {total.toLocaleString()} classes
               </p>
               <div className="flex items-center gap-2">
                 <button
                   type="button"
-                  disabled
-                  className="rounded-lg border border-stone-200 px-4 py-1.5 text-stone-400"
+                  disabled={page <= 1}
+                  onClick={() => setPage((p) => Math.max(1, p - 1))}
+                  className="rounded-lg border border-stone-200 px-4 py-1.5 text-stone-600 hover:bg-stone-50 disabled:text-stone-300"
                 >
                   Prev
                 </button>
                 <button
                   type="button"
-                  className="rounded-lg border border-stone-200 px-4 py-1.5 text-stone-600 hover:bg-stone-50"
+                  disabled={page >= pageCount}
+                  onClick={() => setPage((p) => Math.min(pageCount, p + 1))}
+                  className="rounded-lg border border-stone-200 px-4 py-1.5 text-stone-600 hover:bg-stone-50 disabled:text-stone-300"
                 >
                   Next
                 </button>
@@ -365,41 +532,36 @@ export default function AcademicAffairsDashboard() {
           <div className="relative overflow-hidden rounded-2xl bg-rose-800 p-6 text-white">
             <GraduationCapIcon className="pointer-events-none absolute -bottom-4 -right-4 h-28 w-28 text-rose-700/60" />
             <p className="relative text-xs font-bold uppercase tracking-wide text-rose-100">
-              Total Enrolled Students
+              Registered Students
             </p>
-            <p className="relative mt-2 text-4xl font-extrabold">12,482</p>
-            <p className="relative mt-2 text-sm font-semibold text-emerald-300">
-              ↗ +4.2% from last session
+            <p className="relative mt-2 text-4xl font-extrabold">
+              {lookupsLoading
+                ? "—"
+                : (summary?.totalEnrolledStudents ?? 0).toLocaleString()}
+            </p>
+            <p className="relative mt-2 text-sm font-semibold text-rose-100">
+              Across {summary?.totalClasses ?? 0} classes ·{" "}
+              {summary?.totalCourses ?? 0} courses
             </p>
           </div>
 
           <div className="rounded-2xl border border-stone-200 bg-white p-6">
             <h3 className="text-sm font-bold uppercase tracking-wide text-stone-500">
-              Upcoming Deadlines
+              Schedule Coverage
             </h3>
-            <ul className="mt-4 space-y-3">
-              {upcomingDeadlines.map((deadline) => (
-                <li
-                  key={deadline.id}
-                  className={`flex items-start gap-4 rounded-lg border-l-4 p-3 ${deadline.accentClassName}`}
-                >
-                  <div className="text-center leading-none">
-                    <p className="text-lg font-extrabold">{deadline.day}</p>
-                    <p className="text-[10px] font-bold uppercase">
-                      {deadline.month}
-                    </p>
-                  </div>
-                  <div>
-                    <p className="text-sm font-semibold text-stone-800">
-                      {deadline.title}
-                    </p>
-                    <p className="mt-0.5 text-xs text-stone-500">
-                      {deadline.description}
-                    </p>
-                  </div>
-                </li>
-              ))}
-            </ul>
+            <p className="mt-3 text-2xl font-bold text-stone-900">
+              {summary?.scheduleCoverage.percent ?? 0}%
+            </p>
+            <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-stone-100">
+              <div
+                className="h-full rounded-full bg-rose-700"
+                style={{ width: `${summary?.scheduleCoverage.percent ?? 0}%` }}
+              />
+            </div>
+            <p className="mt-2 text-xs text-stone-500">
+              {summary?.scheduleCoverage.scheduled ?? 0} of{" "}
+              {summary?.scheduleCoverage.total ?? 0} classes have timetable entries.
+            </p>
           </div>
 
           <div className="rounded-2xl border border-stone-200 bg-white p-6 text-center">
@@ -407,17 +569,31 @@ export default function AcademicAffairsDashboard() {
               <h3 className="text-sm font-bold uppercase tracking-wide text-stone-500">
                 Conflict Watch
               </h3>
-              <AlertTriangleIcon className="h-5 w-5 text-amber-500" />
+              <AlertTriangleIcon
+                className={`h-5 w-5 ${
+                  summary?.conflictCount ? "text-rose-600" : "text-amber-500"
+                }`}
+              />
             </div>
-            <span className="mx-auto mt-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-rose-50 text-rose-600">
+            <span
+              className={`mx-auto mt-4 flex h-14 w-14 items-center justify-center rounded-2xl ${
+                summary?.conflictCount
+                  ? "bg-rose-50 text-rose-600"
+                  : "bg-emerald-50 text-emerald-600"
+              }`}
+            >
               <CalendarXIcon className="h-7 w-7" />
             </span>
             <p className="mt-4 font-semibold text-stone-800">
-              No critical schedule conflicts
+              {summaryQuery.isLoading
+                ? "Checking…"
+                : summary?.conflictCount
+                  ? `${summary.conflictCount} schedule conflict${summary.conflictCount > 1 ? "s" : ""}`
+                  : "No schedule conflicts"}
             </p>
             <p className="mt-1 text-xs text-stone-500">
-              Automatic conflict detection is currently active for the
-              2024/25 session.
+              Room and instructor double-bookings are detected across the
+              selected semester.
             </p>
             <Link
               href="/academic-affairs/course-registration"
@@ -426,115 +602,49 @@ export default function AcademicAffairsDashboard() {
               View Global Timetable
             </Link>
           </div>
+
+          <div className="rounded-2xl border border-stone-200 bg-white p-6">
+            <h3 className="text-sm font-bold uppercase tracking-wide text-stone-500">
+              Upcoming Deadlines
+            </h3>
+            {deadlinesQuery.isLoading ? (
+              <p className="mt-4 text-sm text-stone-400">Loading…</p>
+            ) : deadlines.length === 0 ? (
+              <p className="mt-4 text-sm text-stone-400">
+                Nothing due in the next 90 days.
+              </p>
+            ) : (
+              <ul className="mt-4 space-y-3">
+                {deadlines.map((deadline) => (
+                  <li
+                    key={deadline.id}
+                    className={`flex items-start gap-4 rounded-lg border-l-4 p-3 ${deadline.accentClassName}`}
+                  >
+                    <div className="text-center leading-none">
+                      <p className="text-lg font-extrabold">{deadline.day}</p>
+                      <p className="text-[10px] font-bold uppercase">
+                        {deadline.month}
+                      </p>
+                    </div>
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-semibold text-stone-800">
+                        {deadline.title}
+                      </p>
+                      <p className="mt-0.5 text-xs text-stone-500">
+                        {deadline.description}
+                      </p>
+                      <p className="mt-0.5 text-xs font-semibold">
+                        in {deadline.daysAway} day
+                        {deadline.daysAway === 1 ? "" : "s"}
+                      </p>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
         </aside>
       </div>
-
-      {showBulkUploadModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
-          <div className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-xl">
-            <div className="flex items-start justify-between">
-              <div>
-                <h3 className="text-lg font-bold text-stone-900">
-                  Bulk Upload
-                </h3>
-                <p className="mt-1 text-sm text-stone-500">
-                  Upload an Excel or CSV file to add or update multiple
-                  academic program records at once.
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={() => setShowBulkUploadModal(false)}
-                aria-label="Close"
-                className="text-stone-400 hover:text-stone-600"
-              >
-                <XIcon className="h-5 w-5" />
-              </button>
-            </div>
-
-            <div
-              className={`mt-5 rounded-2xl border-2 border-dashed p-8 text-center transition-colors ${
-                isDraggingUpload
-                  ? "border-rose-400 bg-rose-100/60"
-                  : "border-rose-200 bg-rose-50/40"
-              }`}
-              onDragOver={(e) => {
-                e.preventDefault();
-                setIsDraggingUpload(true);
-              }}
-              onDragLeave={() => setIsDraggingUpload(false)}
-              onDrop={(e) => {
-                e.preventDefault();
-                setIsDraggingUpload(false);
-                selectUploadFile(e.dataTransfer.files?.[0]);
-              }}
-            >
-              <span className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-rose-100 text-rose-600">
-                <UploadCloudIcon className="h-7 w-7" />
-              </span>
-              <p className="mt-4 font-semibold text-stone-800">
-                Drag and drop your file here
-              </p>
-              <p className="mt-1 text-xs text-stone-500">
-                Supports .xlsx, .xls, and .csv files
-              </p>
-              <input
-                ref={uploadInputRef}
-                type="file"
-                accept=".xlsx,.xls,.csv"
-                className="hidden"
-                onChange={(e) => selectUploadFile(e.target.files?.[0])}
-              />
-              <button
-                type="button"
-                onClick={() => uploadInputRef.current?.click()}
-                className="mt-4 inline-flex items-center gap-2 rounded-lg border border-stone-300 bg-white px-4 py-2 text-sm font-semibold text-stone-700 hover:bg-stone-50"
-              >
-                <UploadCloudIcon className="h-4 w-4" />
-                Browse Files
-              </button>
-
-              {uploadFile && (
-                <div className="mx-auto mt-4 flex max-w-xs items-center justify-between gap-2 rounded-lg border border-stone-200 bg-white px-3 py-2 text-left">
-                  <span className="flex min-w-0 items-center gap-2 text-sm text-stone-700">
-                    <FileTextIcon className="h-4 w-4 shrink-0 text-rose-600" />
-                    <span className="truncate">{uploadFile.name}</span>
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => setUploadFile(null)}
-                    aria-label="Remove file"
-                    className="shrink-0 text-stone-400 hover:text-rose-600"
-                  >
-                    <XIcon className="h-4 w-4" />
-                  </button>
-                </div>
-              )}
-            </div>
-
-            {uploadError && (
-              <p className="mt-3 text-sm font-medium text-rose-600">{uploadError}</p>
-            )}
-
-            <div className="mt-6 flex items-center justify-end gap-4">
-              <button
-                type="button"
-                onClick={() => setShowBulkUploadModal(false)}
-                className="text-sm font-semibold text-stone-500 hover:text-stone-700"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={handleSaveBulkUpload}
-                className="rounded-lg bg-rose-800 px-5 py-2.5 text-sm font-semibold text-white hover:bg-rose-900"
-              >
-                Save
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
 
       {toast && (
         <div className="fixed bottom-6 right-6 z-50 flex items-center gap-3 rounded-xl bg-emerald-600 px-5 py-4 text-white shadow-xl">
