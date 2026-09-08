@@ -128,3 +128,144 @@ export interface AuditLogDTO {
   details: string | null;
   createdAt: string;
 }
+
+// ─── Student Affairs ────────────────────────────────────────────────────────
+
+export type StudentStatus =
+  | "PENDING"
+  | "ENROLLED"
+  | "GRADUATED"
+  | "WITHDRAWN"
+  | "ON_LEAVE";
+
+export type Gender = "MALE" | "FEMALE" | "OTHER";
+
+export type BloodGroup =
+  | "A_POS"
+  | "A_NEG"
+  | "B_POS"
+  | "B_NEG"
+  | "AB_POS"
+  | "AB_NEG"
+  | "O_POS"
+  | "O_NEG";
+
+export type DocumentType = "ID_CARD" | "TRANSCRIPT" | "CERTIFICATE" | "OTHER";
+
+export interface DepartmentDTO {
+  id: string;
+  name: string;
+  createdAt?: string;
+}
+
+export interface AcademicYearDTO {
+  id: string;
+  yearLabel: string;
+  startDate: string;
+  endDate: string;
+}
+
+export interface StudentDTO {
+  id: string;
+  userId?: string | null;
+  studentNumber: string;
+  firstName: string;
+  lastName: string;
+  dateOfBirth?: string | null;
+  gender?: Gender | null;
+  guardianName?: string | null;
+  guardianContact?: string | null;
+  contactDetails?: string | null;
+  personalEmail?: string | null;
+  bloodGroup?: BloodGroup | null;
+  enrollmentDate?: string | null;
+  status: StudentStatus;
+  departmentId?: string | null;
+  department?: DepartmentDTO | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface StudentSummaryDTO {
+  total: number;
+  byStatus: Record<StudentStatus, number>;
+  currentAcademicYear: { id: string; yearLabel: string } | null;
+}
+
+export interface StudentDocumentDTO {
+  id: string;
+  studentId: string;
+  documentType: DocumentType;
+  fileUrl: string;
+  uploadedAt: string;
+}
+
+export interface CreateStudentBody {
+  studentNumber: string;
+  firstName: string;
+  lastName: string;
+  dateOfBirth?: string;
+  gender?: Gender;
+  guardianName?: string;
+  guardianContact?: string;
+  contactDetails?: string;
+  personalEmail?: string;
+  bloodGroup?: BloodGroup;
+  enrollmentDate?: string;
+  status?: StudentStatus;
+  departmentId?: string;
+}
+
+export interface UpdateStudentBody {
+  firstName?: string;
+  lastName?: string;
+  dateOfBirth?: string;
+  gender?: Gender;
+  guardianName?: string;
+  guardianContact?: string;
+  contactDetails?: string;
+  personalEmail?: string;
+  bloodGroup?: BloodGroup | null;
+  departmentId?: string;
+}
+
+export interface ImportStudentsBody {
+  students?: CreateStudentBody[];
+  csv?: string;
+}
+
+export interface ImportStudentsResultDTO {
+  createdCount: number;
+  failedCount: number;
+  created: StudentDTO[];
+  errors: Array<{ row: number; message: string }>;
+}
+
+export interface EnrollmentReportDTO {
+  id: string;
+  academicYearId: string;
+  academicYear?: { id: string; yearLabel: string };
+  departmentId?: string | null;
+  department?: DepartmentDTO | null;
+  totalActiveStudents: number;
+  totalNewStudents: number;
+  sentToPrincipal: boolean;
+  fileUrl?: string | null;
+  generatedAt: string;
+}
+
+export interface GenerateReportBody {
+  academicYearId: string;
+  departmentId?: string;
+  fileUrl?: string;
+}
+
+export interface AddStudentDocumentBody {
+  documentType: DocumentType;
+  fileUrl: string;
+}
+
+export interface LinkStudentAccountBody {
+  userId: string;
+}
+
