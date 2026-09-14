@@ -3,7 +3,7 @@
 import type {
   EnrollmentReportDTO,
   StudentDTO,
-  StudentStatusDTO,
+  StudentStatus,
 } from "@/lib/api/types";
 import type { StatusTone } from "@/components/status-badge";
 import {
@@ -25,7 +25,7 @@ export interface StudentRecord {
   email: string;
   studentNumber: string;
   department: string;
-  status: StudentStatusDTO;
+  status: StudentStatus;
   statusLabel: string;
   enrolledOn: string;
   hasAccount: boolean;
@@ -47,7 +47,7 @@ export function fromApiStudent(dto: StudentDTO): StudentRecord {
   };
 }
 
-export const STUDENT_STATUSES: StudentStatusDTO[] = [
+export const STUDENT_STATUSES: StudentStatus[] = [
   "PENDING",
   "ENROLLED",
   "GRADUATED",
@@ -60,7 +60,7 @@ export const STUDENT_STATUS_OPTIONS = STUDENT_STATUSES.map((value) => ({
   label: titleCase(value),
 }));
 
-export const studentStatusTone: Record<StudentStatusDTO, StatusTone> = {
+export const studentStatusTone: Record<StudentStatus, StatusTone> = {
   ENROLLED: "green",
   PENDING: "amber",
   GRADUATED: "sky",
@@ -103,10 +103,11 @@ export interface EnrollmentReportRow {
 
 export function fromApiEnrollmentReport(dto: EnrollmentReportDTO): EnrollmentReportRow {
   const scope = dto.department?.name ?? "All departments";
+  const yearLabel = dto.academicYear?.yearLabel ?? "—";
   return {
     id: dto.id,
-    title: `${scope} — ${dto.academicYear.yearLabel}`,
-    academicYear: dto.academicYear.yearLabel,
+    title: `${scope} — ${yearLabel}`,
+    academicYear: yearLabel,
     department: scope,
     totalNewStudents: dto.totalNewStudents,
     totalActiveStudents: dto.totalActiveStudents,
@@ -114,6 +115,6 @@ export function fromApiEnrollmentReport(dto: EnrollmentReportDTO): EnrollmentRep
     statusLabel: dto.sentToPrincipal ? "Delivered" : "Draft",
     generatedAt: formatDate(dto.generatedAt),
     generatedRelative: formatRelative(dto.generatedAt),
-    fileUrl: dto.fileUrl,
+    fileUrl: dto.fileUrl ?? null,
   };
 }
