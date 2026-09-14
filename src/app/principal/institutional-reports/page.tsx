@@ -277,7 +277,7 @@ export default function InstitutionalReportsPage() {
                           {r.department?.name ?? "All departments"}
                         </td>
                         <td className="px-6 py-4 text-stone-600">
-                          {r.academicYear.yearLabel}
+                          {r.academicYear?.yearLabel ?? "—"}
                         </td>
                         <td className="px-6 py-4 text-stone-600">
                           {r.totalNewStudents}

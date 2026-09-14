@@ -129,13 +129,33 @@ export interface AuditLogDTO {
   createdAt: string;
 }
 
-// ─── Shared lookups (readable by Academic Affairs) ──────────────────────────
+// ─── Student Affairs ────────────────────────────────────────────────────────
 
-/** `GET /student-affairs/departments`. */
+export type StudentStatus =
+  | "PENDING"
+  | "ENROLLED"
+  | "GRADUATED"
+  | "WITHDRAWN"
+  | "ON_LEAVE";
+
+export type Gender = "MALE" | "FEMALE" | "OTHER";
+
+export type BloodGroup =
+  | "A_POS"
+  | "A_NEG"
+  | "B_POS"
+  | "B_NEG"
+  | "AB_POS"
+  | "AB_NEG"
+  | "O_POS"
+  | "O_NEG";
+
+export type DocumentType = "ID_CARD" | "TRANSCRIPT" | "CERTIFICATE" | "OTHER";
+
 export interface DepartmentDTO {
   id: string;
   name: string;
-  createdAt: string;
+  createdAt?: string;
 }
 
 /** `GET /student-affairs/academic-years`. */
@@ -357,48 +377,39 @@ export interface CourseImportResultDTO {
   errors: Array<{ row: number; message: string }>;
 }
 
-// ─── Student Affairs ────────────────────────────────────────────────────────
-
-export type StudentStatusDTO =
-  | "PENDING"
-  | "ENROLLED"
-  | "GRADUATED"
-  | "WITHDRAWN"
-  | "ON_LEAVE";
-
-export type GenderDTO = "MALE" | "FEMALE" | "OTHER";
-
-export type BloodGroupDTO =
-  | "A_POS" | "A_NEG" | "B_POS" | "B_NEG"
-  | "AB_POS" | "AB_NEG" | "O_POS" | "O_NEG";
-
 export interface StudentDTO {
   id: string;
-  userId: string | null;
+  userId?: string | null;
   studentNumber: string;
   firstName: string;
   lastName: string;
-  dateOfBirth: string | null;
-  gender: GenderDTO | null;
-  guardianName: string | null;
-  guardianContact: string | null;
-  contactDetails: string | null;
-  personalEmail: string | null;
-  bloodGroup: BloodGroupDTO | null;
-  enrollmentDate: string;
-  status: StudentStatusDTO;
-  departmentId: string | null;
-  createdById: string;
+  dateOfBirth?: string | null;
+  gender?: Gender | null;
+  guardianName?: string | null;
+  guardianContact?: string | null;
+  contactDetails?: string | null;
+  personalEmail?: string | null;
+  bloodGroup?: BloodGroup | null;
+  enrollmentDate?: string | null;
+  status: StudentStatus;
+  departmentId?: string | null;
+  department?: DepartmentDTO | null;
   createdAt: string;
   updatedAt: string;
-  department: { id: string; name: string } | null;
 }
 
-/** `GET /student-affairs/students/summary`. */
 export interface StudentSummaryDTO {
   total: number;
-  byStatus: Record<StudentStatusDTO, number>;
+  byStatus: Record<StudentStatus, number>;
   currentAcademicYear: { id: string; yearLabel: string } | null;
+}
+
+export interface StudentDocumentDTO {
+  id: string;
+  studentId: string;
+  documentType: DocumentType;
+  fileUrl: string;
+  uploadedAt: string;
 }
 
 export interface CreateStudentBody {
@@ -406,18 +417,36 @@ export interface CreateStudentBody {
   firstName: string;
   lastName: string;
   dateOfBirth?: string;
-  gender?: GenderDTO;
+  gender?: Gender;
   guardianName?: string;
   guardianContact?: string;
   contactDetails?: string;
   personalEmail?: string;
-  bloodGroup?: BloodGroupDTO;
+  bloodGroup?: BloodGroup;
   enrollmentDate?: string;
-  status?: StudentStatusDTO;
+  status?: StudentStatus;
   departmentId?: string;
 }
 
-export interface StudentImportResultDTO {
+export interface UpdateStudentBody {
+  firstName?: string;
+  lastName?: string;
+  dateOfBirth?: string;
+  gender?: Gender;
+  guardianName?: string;
+  guardianContact?: string;
+  contactDetails?: string;
+  personalEmail?: string;
+  bloodGroup?: BloodGroup | null;
+  departmentId?: string;
+}
+
+export interface ImportStudentsBody {
+  students?: CreateStudentBody[];
+  csv?: string;
+}
+
+export interface ImportStudentsResultDTO {
   createdCount: number;
   failedCount: number;
   created: StudentDTO[];
@@ -426,16 +455,15 @@ export interface StudentImportResultDTO {
 
 export interface EnrollmentReportDTO {
   id: string;
-  generatedById: string;
   academicYearId: string;
-  departmentId: string | null;
-  totalNewStudents: number;
+  academicYear?: { id: string; yearLabel: string };
+  departmentId?: string | null;
+  department?: DepartmentDTO | null;
   totalActiveStudents: number;
-  fileUrl: string | null;
+  totalNewStudents: number;
   sentToPrincipal: boolean;
+  fileUrl?: string | null;
   generatedAt: string;
-  academicYear: { id: string; yearLabel: string };
-  department: { id: string; name: string } | null;
 }
 
 // ─── Teacher ────────────────────────────────────────────────────────────────
@@ -680,14 +708,14 @@ export interface StudentProfileDTO {
   firstName: string;
   lastName: string;
   dateOfBirth: string | null;
-  gender: GenderDTO | null;
+  gender: Gender | null;
   guardianName: string | null;
   guardianContact: string | null;
   contactDetails: string | null;
   personalEmail: string | null;
-  bloodGroup: BloodGroupDTO | null;
+  bloodGroup: BloodGroup | null;
   enrollmentDate: string;
-  status: StudentStatusDTO;
+  status: StudentStatus;
   department: { id: string; name: string } | null;
 }
 
@@ -886,20 +914,6 @@ export interface InstitutionalMetricDTO {
   academicYear: { id: string; yearLabel: string };
 }
 
-// ─── Student documents ──────────────────────────────────────────────────────
-
-export type DocumentTypeDTO = "ID_CARD" | "TRANSCRIPT" | "CERTIFICATE" | "OTHER";
-
-/** `GET|POST /student-affairs/students/:studentId/documents`. */
-export interface StudentDocumentDTO {
-  id: string;
-  studentId: string;
-  documentType: DocumentTypeDTO;
-  fileUrl: string;
-  uploadedById: string;
-  uploadedAt: string;
-}
-
 // ─── Academic Affairs lookups (writable) ────────────────────────────────────
 
 /** `GET /academic-affairs/departments` — richer than the read-only SAO copy. */
@@ -945,4 +959,19 @@ export interface DeadlineDTO {
   description: string;
   date: string;
   daysAway: number;
+}
+
+export interface GenerateReportBody {
+  academicYearId: string;
+  departmentId?: string;
+  fileUrl?: string;
+}
+
+export interface AddStudentDocumentBody {
+  documentType: DocumentType;
+  fileUrl: string;
+}
+
+export interface LinkStudentAccountBody {
+  userId: string;
 }
