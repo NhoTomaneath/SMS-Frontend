@@ -1,130 +1,107 @@
-import type { ComponentType } from "react";
-import { DollarIcon, GraduationCapIcon, StarIcon, UsersIcon, type IconProps } from "@/components/icons";
+/** View models for the Principal analytics portal. */
 
-export interface OverviewStat {
-  id: string;
-  icon: ComponentType<IconProps>;
-  iconColorClassName: string;
-  trend?: string;
-  trendNote?: string;
-  label: string;
-  value: string;
-  progress: number;
-  progressColorClassName: string;
+import type { StatusTone } from "@/components/status-badge";
+import type {
+  FacultyProfileDTO,
+  PerformanceMetricNameDTO,
+} from "@/lib/api/types";
+import { avatarColor, fullName, initialsOf } from "@/lib/format";
+
+// ─── Performance metrics ────────────────────────────────────────────────────
+
+export const METRIC_LABELS: Record<PerformanceMetricNameDTO, string> = {
+  AVG_GPA: "Average GPA",
+  PASS_RATE: "Pass Rate",
+  ENROLLMENT_GROWTH: "Enrollment Growth",
+  FACULTY_PERFORMANCE: "Faculty Performance",
+};
+
+/** How each metric reads: a GPA is out of 4, the others are percentages or ratings. */
+export const METRIC_UNITS: Record<PerformanceMetricNameDTO, "gpa" | "percent" | "rating"> = {
+  AVG_GPA: "gpa",
+  PASS_RATE: "percent",
+  ENROLLMENT_GROWTH: "percent",
+  FACULTY_PERFORMANCE: "rating",
+};
+
+export function formatMetric(name: PerformanceMetricNameDTO, value: number): string {
+  switch (METRIC_UNITS[name]) {
+    case "gpa":
+      return value.toFixed(2);
+    case "percent":
+      return `${value.toFixed(1)}%`;
+    case "rating":
+      return `${value.toFixed(1)} / 5`;
+  }
 }
 
-export const overviewStats: OverviewStat[] = [
-  {
-    id: "os1",
-    icon: UsersIcon,
-    iconColorClassName: "bg-rose-50 text-rose-700",
-    trend: "↗ +2.4%",
-    label: "Total Student Population",
-    value: "24,582",
-    progress: 62,
-    progressColorClassName: "bg-rose-700",
-  },
-  {
-    id: "os2",
-    icon: GraduationCapIcon,
-    iconColorClassName: "bg-sky-50 text-sky-700",
-    trend: "↗ +0.8%",
-    label: "Active Faculty",
-    value: "1,142",
-    progress: 45,
-    progressColorClassName: "bg-sky-600",
-  },
-  {
-    id: "os3",
-    icon: DollarIcon,
-    iconColorClassName: "bg-emerald-50 text-emerald-700",
-    trend: "↗ +12.5%",
-    label: "Research Funding",
-    value: "$42.8M",
-    progress: 78,
-    progressColorClassName: "bg-emerald-600",
-  },
-  {
-    id: "os4",
-    icon: StarIcon,
-    iconColorClassName: "bg-amber-50 text-amber-500",
-    trendNote: "Target: 3.5",
-    label: "Average Institutional GPA",
-    value: "3.38",
-    progress: 90,
-    progressColorClassName: "bg-amber-500",
-  },
-];
-
-export const trendYears = ["2019", "2020", "2021", "2022", "2023"];
-export const enrollmentTrend = [58, 64, 70, 78, 88];
-export const graduationTrend = [50, 54, 58, 63, 70];
-
-export interface ReportItem {
-  id: string;
-  name: string;
-  type: string;
-  size: string;
-  colorClassName: string;
+/** Normalises a metric onto 0–100 so different units share one bar scale. */
+export function metricProgress(name: PerformanceMetricNameDTO, value: number): number {
+  switch (METRIC_UNITS[name]) {
+    case "gpa":
+      return Math.min(100, Math.round((value / 4) * 100));
+    case "rating":
+      return Math.min(100, Math.round((value / 5) * 100));
+    case "percent":
+      return Math.min(100, Math.max(0, Math.round(value)));
+  }
 }
 
-export const reports: ReportItem[] = [
-  {
-    id: "r1",
-    name: "Enrollment Audit Q3",
-    type: "PDF",
-    size: "12.4 MB",
-    colorClassName: "bg-rose-50 text-rose-700",
-  },
-  {
-    id: "r2",
-    name: "Financial Summary 2024",
-    type: "XLSX",
-    size: "4.8 MB",
-    colorClassName: "bg-emerald-50 text-emerald-700",
-  },
-  {
-    id: "r3",
-    name: "Graduation Forecast",
-    type: "PDF",
-    size: "8.2 MB",
-    colorClassName: "bg-rose-50 text-rose-700",
-  },
-];
+// ─── Faculty ────────────────────────────────────────────────────────────────
 
-export interface FacultyPerformanceRow {
+export interface FacultyRow {
   id: string;
+  userId: string;
   name: string;
   initials: string;
   avatarColorClassName: string;
+  email: string;
   department: string;
   publicationIndex: number;
-  maxPublicationIndex: number;
   studentRating: number;
-  status: "Exceptional" | "Achieved";
+  performanceLabel: string;
 }
 
-export const facultyPerformance: FacultyPerformanceRow[] = [
-  {
-    id: "fp1",
-    name: "Dr. Elena Rodriguez",
-    initials: "ER",
-    avatarColorClassName: "bg-rose-100 text-rose-700",
-    department: "Science & Research",
-    publicationIndex: 8.5,
-    maxPublicationIndex: 10,
-    studentRating: 4.8,
-    status: "Exceptional",
-  },
-  {
-    id: "fp2",
-    name: "Prof. Marcus Chen",
-    initials: "MC",
-    avatarColorClassName: "bg-sky-100 text-sky-700",
-    department: "Engineering",
-    publicationIndex: 7.2,
-    maxPublicationIndex: 10,
-    studentRating: 4.2,
-    status: "Achieved",
-  },
+export function fromApiFacultyProfile(dto: FacultyProfileDTO): FacultyRow {
+  return {
+    id: dto.id,
+    userId: dto.userId,
+    name: fullName(dto.user.firstName, dto.user.lastName),
+    initials: initialsOf(dto.user.firstName, dto.user.lastName),
+    avatarColorClassName: avatarColor(dto.userId),
+    email: dto.user.email,
+    department: dto.departmentName,
+    publicationIndex: dto.publicationIndex,
+    studentRating: dto.studentRating,
+    performanceLabel: dto.performanceLabel,
+  };
+}
+
+export function performanceTone(label: string): StatusTone {
+  const normalised = label.toLowerCase();
+  if (normalised.includes("excellent")) return "green";
+  if (normalised.includes("strong")) return "sky";
+  if (normalised.includes("satisfactory")) return "amber";
+  return "rose";
+}
+
+// ─── Status colours for the enrollment mix ──────────────────────────────────
+
+export const STATUS_BAR_COLORS: Record<string, string> = {
+  ENROLLED: "bg-rose-700",
+  PENDING: "bg-amber-500",
+  GRADUATED: "bg-emerald-600",
+  WITHDRAWN: "bg-stone-500",
+  ON_LEAVE: "bg-sky-600",
+};
+
+/** Palette for the grade-distribution bars, ordered best to worst. */
+export const GRADE_BAR_COLORS = [
+  "bg-rose-900",
+  "bg-rose-700",
+  "bg-red-500",
+  "bg-amber-500",
+  "bg-teal-700",
+  "bg-stone-500",
+  "bg-stone-700",
 ];

@@ -3,6 +3,8 @@
 import { usePathname } from "next/navigation";
 import { DashboardShell } from "@/components/dashboard-shell";
 import { FileTextIcon, GraduationCapIcon, StarIcon } from "@/components/icons";
+import { useAuth } from "@/lib/auth/auth-context";
+import { roleLabel } from "@/lib/auth/roles";
 
 function isExamSetupActive(pathname: string) {
   return (
@@ -25,6 +27,7 @@ export function ControllerOfExaminationShell({
   children: React.ReactNode;
 }) {
   const pathname = usePathname();
+  const { user } = useAuth();
 
   const navItems = [
     {
@@ -51,8 +54,8 @@ export function ControllerOfExaminationShell({
     <DashboardShell
       homeHref="/controller-of-examination/exam-setup"
       navItems={navItems}
-      userName="COE"
-      userRole="Controller of Examination"
+      userName={user ? `${user.firstName} ${user.lastName}` : "Controller of Examination"}
+      userRole={user ? roleLabel(user.role) : "Controller of Examination"}
     >
       {children}
     </DashboardShell>

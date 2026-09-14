@@ -619,3 +619,22 @@ export function ZapIcon(props: IconProps) {
     </svg>
   );
 }
+
+export function LayersIcon(props: IconProps) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.8}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      {...props}
+    >
+      <path d="M12 3 3 8l9 5 9-5-9-5Z" />
+      <path d="m3 13 9 5 9-5" />
+      <path d="m3 18 9 5 9-5" />
+    </svg>
+  );
+}

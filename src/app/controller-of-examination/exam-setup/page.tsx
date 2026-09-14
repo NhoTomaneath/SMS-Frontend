@@ -1,473 +1,758 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { PageHeader } from "@/components/page-header";
-import { PromoBanner } from "@/components/promo-banner";
-import { StatusBadge, type StatusTone } from "@/components/status-badge";
-import { ToggleSwitch } from "@/components/toggle-switch";
+import { StatusBadge } from "@/components/status-badge";
+import { LoadingRow, ErrorRow, EmptyRow } from "@/components/query-states";
 import {
-  ArrowRightIcon,
-  BriefcaseIcon,
-  ClipboardCheckIcon,
-  ClipboardClockIcon,
-  DoorIcon,
-  EnvelopeIcon,
-  EyeIcon,
-  FunnelIcon,
+  CheckCircleIcon,
+  FileTextIcon,
   PlusIcon,
-  UserPlusIcon,
+  XIcon,
 } from "@/components/icons";
+import { apiFetch, ApiRequestError } from "@/lib/api/client";
+import { useApiQuery } from "@/lib/api/hooks";
+import type {
+  ClassDTO,
+  CoeExamPaperDTO,
+  ExamDTO,
+  ExamRoomAssignmentDTO,
+  ExamRoomDTO,
+  ExamStatusDTO,
+  InvigilatorDTO,
+  TeacherOptionDTO,
+} from "@/lib/api/types";
 import {
-  INVIGILATOR_OPTIONS,
-  ROOM_OPTIONS,
-  initialActivity,
-  initialExams,
-  type ExamRow,
-  type ExamStatus,
+  EXAM_STATUS_FLOW,
+  EXAM_TYPE_OPTIONS,
+  examPaperTone,
+  examStatusTone,
+  fromApiExam,
 } from "@/lib/coe/exam-setup-data";
+import { fullName, titleCase } from "@/lib/format";
 
-const statusTone: Record<ExamStatus, StatusTone> = {
-  "Paper Pending": "rose",
-  "Exam Paper Received": "green",
-  "Room Assigned": "sky",
-  "Ready for Launch": "green",
-};
+const COE_KEY = ["coe"] as const;
+const EXAMS_KEY = [...COE_KEY, "exams"] as const;
+const ROOMS_KEY = [...COE_KEY, "exam-rooms"] as const;
+const PAPERS_KEY = [...COE_KEY, "exam-papers"] as const;
+const LOGISTICS_KEY = [...COE_KEY, "logistics"] as const;
 
-interface NewExamForm {
-  subject: string;
-  code: string;
-  department: string;
-  date: string;
-  time: string;
+const PAGE_SIZE = 10;
+
+function errorMessage(err: unknown, fallback: string): string {
+  if (err instanceof ApiRequestError) {
+    const firstFieldError = err.errors ? Object.values(err.errors).flat()[0] : null;
+    return firstFieldError ?? err.message;
+  }
+  return fallback;
 }
 
-const emptyForm: NewExamForm = {
-  subject: "",
-  code: "",
-  department: "",
-  time: "",
-  date: "",
+const emptyExamForm = {
+  classId: "",
+  examType: "MIDTERM",
+  examDate: "",
+  startTime: "09:00",
+  endTime: "11:00",
 };
 
 export default function ExamSetupPage() {
-  const [exams, setExams] = useState(initialExams);
-  const [activity, setActivity] = useState(initialActivity);
-  const [isPublished, setIsPublished] = useState(false);
-  const [showCreateModal, setShowCreateModal] = useState(false);
-  const [form, setForm] = useState<NewExamForm>(emptyForm);
-  const [pendingRemindersOf, setPendingRemindersOf] = useState<Set<string>>(
-    new Set(),
-  );
-  const [assignModalFor, setAssignModalFor] = useState<{
-    exam: ExamRow;
-    kind: "room" | "invigilator";
-  } | null>(null);
-  const [notifyMessage, setNotifyMessage] = useState<string | null>(null);
-  const [facultyPending, setFacultyPending] = useState(5);
+  const queryClient = useQueryClient();
 
-  function logActivity(title: string, description: string) {
-    setActivity((prev) => [
-      {
-        id: `act-${Date.now()}`,
-        barColorClassName: "bg-emerald-500",
-        title,
-        description,
-        meta: "Just now",
+  const [page, setPage] = useState(1);
+  const [statusFilter, setStatusFilter] = useState<"ALL" | ExamStatusDTO>("ALL");
+  const [pickedExamId, setPickedExamId] = useState("");
+
+  const [showCreate, setShowCreate] = useState(false);
+  const [form, setForm] = useState(emptyExamForm);
+  const [formError, setFormError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [toast, setToast] = useState<string | null>(null);
+
+  const [roomToAssign, setRoomToAssign] = useState("");
+  const [invigilatorToAssign, setInvigilatorToAssign] = useState("");
+
+  function showToast(message: string) {
+    setToast(message);
+    window.setTimeout(() => setToast(null), 3500);
+  }
+
+  // ── Queries ───────────────────────────────────────────────────────────────
+
+  const examsQuery = useApiQuery<ExamDTO[]>(
+    [...EXAMS_KEY, { page, statusFilter }],
+    "/coe/exams",
+    {
+      query: {
+        page,
+        limit: PAGE_SIZE,
+        status: statusFilter === "ALL" ? undefined : statusFilter,
       },
-      ...prev,
+      placeholderData: (prev) => prev,
+    },
+  );
+
+  const roomsQuery = useApiQuery<ExamRoomDTO[]>(ROOMS_KEY, "/coe/exam-rooms", {
+    query: { limit: 100 },
+  });
+
+  const classesQuery = useApiQuery<ClassDTO[]>(
+    [...COE_KEY, "classes"],
+    "/academic-affairs/classes",
+    { query: { limit: 100 } },
+  );
+
+  const teachersQuery = useApiQuery<TeacherOptionDTO[]>(
+    [...COE_KEY, "teachers"],
+    "/academic-affairs/teachers",
+  );
+
+  const exams = useMemo(
+    () => (examsQuery.data?.data ?? []).map(fromApiExam),
+    [examsQuery.data],
+  );
+
+  const examId = exams.some((e) => e.id === pickedExamId)
+    ? pickedExamId
+    : exams[0]?.id ?? "";
+  const selectedExam = exams.find((e) => e.id === examId);
+
+  const papersQuery = useApiQuery<CoeExamPaperDTO[]>(
+    [...PAPERS_KEY, { examId }],
+    "/coe/exam-papers",
+    { query: { examId, limit: 50 }, enabled: Boolean(examId) },
+  );
+
+  const roomAssignmentsQuery = useApiQuery<ExamRoomAssignmentDTO[]>(
+    [...LOGISTICS_KEY, "rooms", { examId }],
+    `/coe/exams/${examId}/rooms`,
+    { enabled: Boolean(examId) },
+  );
+
+  const invigilatorsQuery = useApiQuery<InvigilatorDTO[]>(
+    [...LOGISTICS_KEY, "invigilators", { examId }],
+    `/coe/exams/${examId}/invigilators`,
+    { enabled: Boolean(examId) },
+  );
+
+  const rooms = roomsQuery.data?.data ?? [];
+  const classes = classesQuery.data?.data ?? [];
+  const teachers = teachersQuery.data?.data ?? [];
+  const papers = papersQuery.data?.data ?? [];
+  const assignedRooms = roomAssignmentsQuery.data?.data ?? [];
+  const invigilators = invigilatorsQuery.data?.data ?? [];
+
+  const total = examsQuery.data?.pagination?.total ?? 0;
+  const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE));
+
+  // The exam's semester follows its class — the API needs both.
+  const selectedClass = classes.find((c) => c.id === form.classId);
+
+  // ── Mutations ─────────────────────────────────────────────────────────────
+
+  async function invalidateExam() {
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: EXAMS_KEY }),
+      queryClient.invalidateQueries({ queryKey: LOGISTICS_KEY }),
+      queryClient.invalidateQueries({ queryKey: PAPERS_KEY }),
     ]);
   }
 
-  function sendReminder(exam: ExamRow) {
-    setPendingRemindersOf((prev) => new Set(prev).add(exam.id));
-    window.setTimeout(() => {
-      setExams((prev) =>
-        prev.map((e) =>
-          e.id === exam.id ? { ...e, status: "Exam Paper Received" } : e,
-        ),
-      );
-      setPendingRemindersOf((prev) => {
-        const next = new Set(prev);
-        next.delete(exam.id);
-        return next;
-      });
-      logActivity(
-        "Paper Received",
-        `${exam.subject} (${exam.code}) paper uploaded after reminder.`,
-      );
-    }, 1500);
-  }
-
-  function confirmAssignment(value: string) {
-    if (!assignModalFor) return;
-    const { exam, kind } = assignModalFor;
-    setExams((prev) =>
-      prev.map((e) => {
-        if (e.id !== exam.id) return e;
-        if (kind === "room") {
-          return { ...e, room: value, status: "Room Assigned" };
-        }
-        return { ...e, invigilator: value, status: "Ready for Launch" };
+  const createExam = useMutation({
+    mutationFn: () =>
+      apiFetch<ExamDTO>("/coe/exams", {
+        method: "POST",
+        body: {
+          classId: form.classId,
+          semesterId: selectedClass?.semesterId,
+          examType: form.examType,
+          examDate: form.examDate,
+          startTime: form.startTime,
+          endTime: form.endTime,
+        },
       }),
-    );
-    logActivity(
-      kind === "room" ? "Room Assigned" : "Invigilator Assigned",
-      kind === "room"
-        ? `${value} assigned to ${exam.code}`
-        : `${value} assigned to invigilate ${exam.code}`,
-    );
-    setAssignModalFor(null);
-  }
+    onSuccess: async (res) => {
+      await invalidateExam();
+      setShowCreate(false);
+      setForm(emptyExamForm);
+      setFormError(null);
+      setPickedExamId(res.data.id);
+      showToast("Exam created.");
+    },
+    onError: (err) => setFormError(errorMessage(err, "Could not create the exam.")),
+  });
 
-  function handleCreateExam(e: React.FormEvent) {
-    e.preventDefault();
-    if (!form.subject || !form.code || !form.department || !form.date) return;
-    const newExam: ExamRow = {
-      id: `e-${Date.now()}`,
-      subject: form.subject,
-      code: form.code,
-      department: form.department,
-      date: form.date,
-      time: form.time || "TBD",
-      status: "Paper Pending",
-    };
-    setExams((prev) => [newExam, ...prev]);
-    logActivity("Exam Created", `${form.subject} (${form.code}) added to schedule.`);
-    setForm(emptyForm);
-    setShowCreateModal(false);
-  }
+  const advanceStatus = useMutation({
+    mutationFn: ({ id, status }: { id: string; status: ExamStatusDTO }) =>
+      apiFetch<ExamDTO>(`/coe/exams/${id}/status`, {
+        method: "PATCH",
+        body: { status },
+      }),
+    onMutate: () => setActionError(null),
+    onSuccess: async (_res, { status }) => {
+      await invalidateExam();
+      showToast(`Exam marked ${titleCase(status)}.`);
+    },
+    onError: (err) => setActionError(errorMessage(err, "Could not update the status.")),
+  });
 
-  function handleAutoNotify() {
-    setNotifyMessage(`Reminder sent to ${facultyPending} faculty members.`);
-    setFacultyPending(0);
-    window.setTimeout(() => setNotifyMessage(null), 4000);
-  }
+  const receivePaper = useMutation({
+    mutationFn: (id: string) =>
+      apiFetch<CoeExamPaperDTO>(`/coe/exam-papers/${id}/receive`, { method: "PATCH" }),
+    onMutate: () => setActionError(null),
+    onSuccess: async () => {
+      await invalidateExam();
+      showToast("Exam paper marked received.");
+    },
+    onError: (err) => setActionError(errorMessage(err, "Could not receive the paper.")),
+  });
 
-  function actionFor(exam: ExamRow) {
-    const isSendingReminder = pendingRemindersOf.has(exam.id);
-    switch (exam.status) {
-      case "Paper Pending":
-        return (
-          <button
-            type="button"
-            disabled={isSendingReminder}
-            onClick={() => sendReminder(exam)}
-            className="flex items-center gap-1.5 text-sm font-semibold text-rose-700 hover:underline disabled:opacity-60"
-          >
-            {isSendingReminder ? "Sending..." : "Send Reminder"}
-            <EnvelopeIcon className="h-4 w-4" />
-          </button>
-        );
-      case "Exam Paper Received":
-        return (
-          <button
-            type="button"
-            onClick={() => setAssignModalFor({ exam, kind: "room" })}
-            className="flex items-center gap-1.5 text-sm font-semibold text-rose-700 hover:underline"
-          >
-            Assign Room
-            <ArrowRightIcon className="h-4 w-4" />
-          </button>
-        );
-      case "Room Assigned":
-        return (
-          <button
-            type="button"
-            onClick={() => setAssignModalFor({ exam, kind: "invigilator" })}
-            className="flex items-center gap-1.5 text-sm font-semibold text-rose-700 hover:underline"
-          >
-            Assign Invigilator
-            <UserPlusIcon className="h-4 w-4" />
-          </button>
-        );
-      case "Ready for Launch":
-        return (
-          <button
-            type="button"
-            className="flex items-center gap-1.5 text-sm font-semibold text-rose-700 hover:underline"
-          >
-            View Details
-            <EyeIcon className="h-4 w-4" />
-          </button>
-        );
-    }
-  }
+  const assignRoom = useMutation({
+    mutationFn: () =>
+      apiFetch<ExamRoomAssignmentDTO>(`/coe/exams/${examId}/rooms`, {
+        method: "POST",
+        body: { examRoomId: roomToAssign },
+      }),
+    onMutate: () => setActionError(null),
+    onSuccess: async () => {
+      await invalidateExam();
+      setRoomToAssign("");
+      showToast("Room assigned.");
+    },
+    onError: (err) => setActionError(errorMessage(err, "Could not assign the room.")),
+  });
+
+  const unassignRoom = useMutation({
+    mutationFn: (examRoomId: string) =>
+      apiFetch(`/coe/exams/${examId}/rooms/${examRoomId}`, { method: "DELETE" }),
+    onMutate: () => setActionError(null),
+    onSuccess: async () => {
+      await invalidateExam();
+      showToast("Room unassigned.");
+    },
+    onError: (err) => setActionError(errorMessage(err, "Could not unassign the room.")),
+  });
+
+  const assignInvigilator = useMutation({
+    mutationFn: () =>
+      apiFetch<InvigilatorDTO>(`/coe/exams/${examId}/invigilators`, {
+        method: "POST",
+        body: { teacherId: invigilatorToAssign },
+      }),
+    onMutate: () => setActionError(null),
+    onSuccess: async () => {
+      await invalidateExam();
+      setInvigilatorToAssign("");
+      showToast("Invigilator assigned.");
+    },
+    onError: (err) =>
+      setActionError(errorMessage(err, "Could not assign the invigilator.")),
+  });
+
+  const unassignInvigilator = useMutation({
+    mutationFn: (teacherId: string) =>
+      apiFetch(`/coe/exams/${examId}/invigilators/${teacherId}`, { method: "DELETE" }),
+    onMutate: () => setActionError(null),
+    onSuccess: async () => {
+      await invalidateExam();
+      showToast("Invigilator removed.");
+    },
+    onError: (err) => setActionError(errorMessage(err, "Could not remove the invigilator.")),
+  });
+
+  const nextStatus = selectedExam
+    ? EXAM_STATUS_FLOW[EXAM_STATUS_FLOW.indexOf(selectedExam.status) + 1]
+    : undefined;
 
   return (
     <div>
       <PageHeader
-        title="Exam Setup Dashboard"
-        description="Session 2023-24 | Semester: Fall"
+        title="Exam Setup & Logistics"
+        description="Schedule exams, receive papers, and assign rooms and invigilators."
         actions={
-          <>
-            <ToggleSwitch
-              label="Publish Schedule"
-              checked={isPublished}
-              onChange={(v) => {
-                setIsPublished(v);
-                if (v) logActivity("Schedule Published", "Fall 2023 exam schedule is now live.");
-              }}
-            />
-            <button
-              type="button"
-              onClick={() => setShowCreateModal(true)}
-              className="flex items-center gap-2 rounded-lg bg-rose-800 px-5 py-2.5 text-sm font-semibold text-white hover:bg-rose-900"
-            >
-              <PlusIcon className="h-4 w-4" />
-              Create Exam
-            </button>
-          </>
+          <button
+            type="button"
+            onClick={() => {
+              setForm({ ...emptyExamForm, classId: classes[0]?.id ?? "" });
+              setFormError(null);
+              setShowCreate(true);
+            }}
+            className="flex items-center gap-2 rounded-lg bg-rose-800 px-5 py-2.5 text-sm font-semibold text-white hover:bg-rose-900"
+          >
+            <PlusIcon className="h-4 w-4" />
+            Create Exam
+          </button>
         }
       />
 
-      <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <div className="rounded-2xl border border-stone-200 bg-white p-5">
-          <ClipboardClockIcon className="h-7 w-7 text-rose-700" />
-          <p className="mt-3 text-3xl font-extrabold text-stone-900">12</p>
-          <p className="mt-1 text-sm text-stone-500">Upcoming Exams</p>
-        </div>
-        <div className="rounded-2xl border border-stone-200 bg-white p-5">
-          <ClipboardCheckIcon className="h-7 w-7 text-emerald-600" />
-          <p className="mt-3 text-3xl font-extrabold text-stone-900">45</p>
-          <p className="mt-1 text-sm text-stone-500">Papers Received</p>
-        </div>
-        <div className="rounded-2xl border border-stone-200 bg-white p-5">
-          <DoorIcon className="h-7 w-7 text-amber-500" />
-          <p className="mt-3 text-3xl font-extrabold text-stone-900">08</p>
-          <p className="mt-1 text-sm text-stone-500">Pending Room Allocations</p>
-        </div>
-        <div className="rounded-2xl bg-rose-800 p-5 text-white">
-          <UserPlusIcon className="h-7 w-7" />
-          <p className="mt-3 text-3xl font-extrabold">124</p>
-          <p className="mt-1 text-sm text-rose-100">Active Invigilators</p>
-        </div>
-      </div>
+      {actionError && (
+        <p className="mb-4 rounded-lg bg-rose-50 px-4 py-3 text-sm font-medium text-rose-700">
+          {actionError}
+        </p>
+      )}
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-[1fr_340px]">
-        <section id="upcoming-exams" className="rounded-2xl border border-stone-200 bg-white">
-          <div className="flex items-center justify-between border-b border-stone-200 p-6">
-            <h2 className="text-xl font-bold text-stone-900">Upcoming Exams</h2>
-            <button
-              type="button"
-              className="flex items-center gap-2 text-sm font-semibold text-stone-500 hover:text-stone-700"
+        <section className="rounded-2xl border border-stone-200 bg-white">
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-stone-200 p-5">
+            <h2 className="text-xl font-bold text-stone-900">Exam Schedule</h2>
+            <select
+              aria-label="Filter by status"
+              value={statusFilter}
+              onChange={(e) => {
+                setPage(1);
+                setStatusFilter(e.target.value as "ALL" | ExamStatusDTO);
+              }}
+              className="rounded-lg border border-stone-300 bg-white px-4 py-2 text-sm font-semibold text-stone-600 outline-none focus:border-rose-400"
             >
-              <FunnelIcon className="h-4 w-4" />
-              Filter by Department
-            </button>
+              <option value="ALL">All statuses</option>
+              {EXAM_STATUS_FLOW.map((s) => (
+                <option key={s} value={s}>
+                  {titleCase(s)}
+                </option>
+              ))}
+            </select>
           </div>
+
           <div className="overflow-x-auto">
             <table className="w-full text-left text-sm">
               <thead>
                 <tr className="text-xs font-bold uppercase tracking-wide text-stone-400">
-                  <th className="px-6 py-3">Subject / Code</th>
-                  <th className="px-6 py-3">Date &amp; Time</th>
-                  <th className="px-6 py-3">Status</th>
-                  <th className="px-6 py-3 text-right">Action</th>
+                  <th className="px-5 py-3">Course</th>
+                  <th className="px-5 py-3">Type</th>
+                  <th className="px-5 py-3">Date &amp; Time</th>
+                  <th className="px-5 py-3">Status</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-stone-100">
-                {exams.map((exam) => (
-                  <tr key={exam.id}>
-                    <td className="px-6 py-4">
-                      <p className="font-semibold text-stone-900">{exam.subject}</p>
-                      <p className="text-sm text-stone-500">
-                        {exam.code} • {exam.department}
-                      </p>
-                    </td>
-                    <td className="px-6 py-4 text-stone-600">
-                      {exam.date}
-                      <br />
-                      {exam.time}
-                    </td>
-                    <td className="px-6 py-4">
-                      <StatusBadge label={`• ${exam.status}`} tone={statusTone[exam.status]} />
-                    </td>
-                    <td className="px-6 py-4 text-right">{actionFor(exam)}</td>
-                  </tr>
-                ))}
+                {examsQuery.isLoading && <LoadingRow colSpan={4} />}
+                {examsQuery.isError && (
+                  <ErrorRow
+                    colSpan={4}
+                    message={examsQuery.error.message}
+                    onRetry={() => examsQuery.refetch()}
+                  />
+                )}
+                {!examsQuery.isLoading &&
+                  !examsQuery.isError &&
+                  exams.map((exam) => (
+                    <tr
+                      key={exam.id}
+                      onClick={() => setPickedExamId(exam.id)}
+                      className={`cursor-pointer ${
+                        exam.id === examId ? "bg-rose-50" : "hover:bg-stone-50"
+                      }`}
+                    >
+                      <td className="px-5 py-4">
+                        <p className="font-bold text-rose-700">{exam.code}</p>
+                        <p className="text-xs text-stone-500">{exam.subject}</p>
+                      </td>
+                      <td className="px-5 py-4 text-stone-600">{exam.examType}</td>
+                      <td className="px-5 py-4">
+                        <p className="text-stone-700">{exam.date}</p>
+                        <p className="text-xs text-stone-400">{exam.time}</p>
+                      </td>
+                      <td className="px-5 py-4">
+                        <StatusBadge
+                          label={titleCase(exam.status)}
+                          tone={examStatusTone[exam.status]}
+                        />
+                      </td>
+                    </tr>
+                  ))}
+                {!examsQuery.isLoading && !examsQuery.isError && exams.length === 0 && (
+                  <EmptyRow colSpan={4} label="No exams match this filter." />
+                )}
               </tbody>
             </table>
           </div>
-          <div className="border-t border-stone-200 p-4 text-center">
-            <button type="button" className="text-sm font-semibold text-rose-700 hover:underline">
-              View All Exams
-            </button>
+
+          <div className="flex items-center justify-between gap-4 border-t border-stone-200 px-5 py-4 text-sm">
+            <p className="text-stone-500">
+              Page {page} of {pageCount} · {total} exams
+            </p>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                disabled={page <= 1}
+                onClick={() => setPage((p) => Math.max(1, p - 1))}
+                className="rounded-lg border border-stone-200 px-4 py-1.5 text-stone-600 hover:bg-stone-50 disabled:text-stone-300"
+              >
+                Prev
+              </button>
+              <button
+                type="button"
+                disabled={page >= pageCount}
+                onClick={() => setPage((p) => Math.min(pageCount, p + 1))}
+                className="rounded-lg border border-stone-200 px-4 py-1.5 text-stone-600 hover:bg-stone-50 disabled:text-stone-300"
+              >
+                Next
+              </button>
+            </div>
           </div>
         </section>
 
         <aside className="space-y-6">
           <div className="rounded-2xl border border-stone-200 bg-white p-6">
-            <h3 className="text-lg font-bold text-stone-900">Quick Allocation</h3>
-            <div className="mt-4 space-y-3">
-              <a
-                href="#upcoming-exams"
-                className="flex items-center gap-3 rounded-xl border border-stone-200 p-3.5 hover:border-stone-300"
+            <h3 className="text-lg font-bold text-stone-900">
+              {selectedExam ? selectedExam.code : "Select an exam"}
+            </h3>
+            <p className="text-sm text-stone-500">
+              {selectedExam ? `${selectedExam.examType} · ${selectedExam.date}` : ""}
+            </p>
+
+            {selectedExam && nextStatus && (
+              <button
+                type="button"
+                disabled={advanceStatus.isPending}
+                onClick={() =>
+                  advanceStatus.mutate({ id: selectedExam.id, status: nextStatus })
+                }
+                className="mt-4 w-full rounded-lg bg-rose-800 py-2.5 text-sm font-semibold text-white hover:bg-rose-900 disabled:opacity-60"
               >
-                <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-rose-50 text-rose-700">
-                  <DoorIcon className="h-5 w-5" />
-                </span>
-                <span className="flex-1">
-                  <span className="block font-semibold text-stone-800">Assign Room</span>
-                  <span className="block text-sm text-stone-500">8 exams pending rooms</span>
-                </span>
-                <span className="text-stone-300">›</span>
-              </a>
-              <a
-                href="#upcoming-exams"
-                className="flex items-center gap-3 rounded-xl border border-stone-200 p-3.5 hover:border-stone-300"
+                Mark {titleCase(nextStatus)}
+              </button>
+            )}
+            {selectedExam && !nextStatus && (
+              <p className="mt-4 rounded-lg bg-emerald-50 px-3 py-2 text-center text-xs font-semibold text-emerald-700">
+                Exam completed
+              </p>
+            )}
+          </div>
+
+          <div className="rounded-2xl border border-stone-200 bg-white p-6">
+            <h3 className="text-sm font-bold uppercase tracking-wide text-stone-500">
+              Exam Papers
+            </h3>
+            {papersQuery.isLoading ? (
+              <p className="mt-3 text-sm text-stone-400">Loading…</p>
+            ) : papers.length === 0 ? (
+              <p className="mt-3 text-sm text-stone-400">
+                No paper submitted for this exam yet.
+              </p>
+            ) : (
+              <ul className="mt-3 space-y-3">
+                {papers.map((paper) => (
+                  <li
+                    key={paper.id}
+                    className="rounded-lg border border-stone-200 p-3"
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-semibold text-stone-800">
+                          {fullName(paper.teacher.firstName, paper.teacher.lastName)}
+                        </p>
+                        <a
+                          href={paper.fileUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="flex items-center gap-1 truncate text-xs text-rose-700 hover:underline"
+                        >
+                          <FileTextIcon className="h-3 w-3 shrink-0" />
+                          {paper.fileUrl.split("/").pop()}
+                        </a>
+                      </div>
+                      <StatusBadge
+                        label={titleCase(paper.status)}
+                        tone={examPaperTone[paper.status]}
+                      />
+                    </div>
+                    {paper.status === "SUBMITTED" && (
+                      <button
+                        type="button"
+                        disabled={receivePaper.isPending}
+                        onClick={() => receivePaper.mutate(paper.id)}
+                        className="mt-2 w-full rounded-lg border border-rose-200 py-1.5 text-xs font-semibold text-rose-700 hover:bg-rose-50 disabled:opacity-60"
+                      >
+                        Mark Received
+                      </button>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+
+          <div className="rounded-2xl border border-stone-200 bg-white p-6">
+            <h3 className="text-sm font-bold uppercase tracking-wide text-stone-500">
+              Rooms
+            </h3>
+            <ul className="mt-3 space-y-2">
+              {assignedRooms.map((a) => (
+                <li
+                  key={a.id}
+                  className="flex items-center justify-between rounded-lg bg-stone-50 px-3 py-2 text-sm"
+                >
+                  <span>
+                    <span className="font-semibold text-stone-800">
+                      {a.examRoom.name}
+                    </span>
+                    <span className="ml-2 text-xs text-stone-500">
+                      {a.examRoom.capacity} seats
+                    </span>
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => unassignRoom.mutate(a.examRoomId)}
+                    aria-label={`Unassign ${a.examRoom.name}`}
+                    className="text-stone-400 hover:text-rose-600"
+                  >
+                    <XIcon className="h-4 w-4" />
+                  </button>
+                </li>
+              ))}
+              {assignedRooms.length === 0 && (
+                <li className="text-sm text-stone-400">No rooms assigned.</li>
+              )}
+            </ul>
+            <div className="mt-3 flex gap-2">
+              <select
+                aria-label="Room to assign"
+                value={roomToAssign}
+                onChange={(e) => setRoomToAssign(e.target.value)}
+                disabled={!examId}
+                className="min-w-0 flex-1 rounded-lg border border-stone-200 px-3 py-2 text-sm outline-none focus:border-rose-400 disabled:bg-stone-50"
               >
-                <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-rose-50 text-rose-700">
-                  <BriefcaseIcon className="h-5 w-5" />
-                </span>
-                <span className="flex-1">
-                  <span className="block font-semibold text-stone-800">Assign Invigilator</span>
-                  <span className="block text-sm text-stone-500">14 shifts available</span>
-                </span>
-                <span className="text-stone-300">›</span>
-              </a>
+                <option value="">Select room…</option>
+                {rooms
+                  .filter((r) => !assignedRooms.some((a) => a.examRoomId === r.id))
+                  .map((r) => (
+                    <option key={r.id} value={r.id}>
+                      {r.name} ({r.capacity})
+                    </option>
+                  ))}
+              </select>
+              <button
+                type="button"
+                disabled={!roomToAssign || assignRoom.isPending}
+                onClick={() => assignRoom.mutate()}
+                className="rounded-lg bg-rose-800 px-3 py-2 text-xs font-semibold text-white hover:bg-rose-900 disabled:opacity-60"
+              >
+                Assign
+              </button>
             </div>
           </div>
 
-          <PromoBanner
-            title="Paper Submission Deadline"
-            description={
-              facultyPending > 0
-                ? `${facultyPending} Faculty members have not submitted their final question papers for the upcoming mid-terms.`
-                : "All faculty members have submitted their final question papers."
-            }
-          />
-          {facultyPending > 0 ? (
-            <button
-              type="button"
-              onClick={handleAutoNotify}
-              className="-mt-4 w-full rounded-lg border border-stone-300 bg-white py-2.5 text-sm font-semibold text-stone-700 hover:bg-stone-50"
-            >
-              Auto-Notify Faculty
-            </button>
-          ) : (
-            notifyMessage && (
-              <p className="-mt-4 text-center text-sm font-medium text-emerald-700">
-                {notifyMessage}
-              </p>
-            )
-          )}
-
           <div className="rounded-2xl border border-stone-200 bg-white p-6">
-            <h3 className="text-lg font-bold text-stone-900">Recent Activity</h3>
-            <ul className="mt-4 space-y-4">
-              {activity.map((item) => (
-                <li key={item.id} className="flex gap-3">
-                  <span className={`w-1 shrink-0 rounded-full ${item.barColorClassName}`} />
-                  <div>
-                    <p className="font-semibold text-stone-800">{item.title}</p>
-                    <p className="text-sm text-stone-500">{item.description}</p>
-                    <p className="mt-0.5 text-xs text-stone-400">{item.meta}</p>
-                  </div>
+            <h3 className="text-sm font-bold uppercase tracking-wide text-stone-500">
+              Invigilators
+            </h3>
+            <ul className="mt-3 space-y-2">
+              {invigilators.map((inv) => (
+                <li
+                  key={inv.id}
+                  className="flex items-center justify-between rounded-lg bg-stone-50 px-3 py-2 text-sm"
+                >
+                  <span className="font-semibold text-stone-800">
+                    {fullName(inv.teacher.firstName, inv.teacher.lastName)}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => unassignInvigilator.mutate(inv.teacherId)}
+                    aria-label="Remove invigilator"
+                    className="text-stone-400 hover:text-rose-600"
+                  >
+                    <XIcon className="h-4 w-4" />
+                  </button>
                 </li>
               ))}
+              {invigilators.length === 0 && (
+                <li className="text-sm text-stone-400">None assigned.</li>
+              )}
             </ul>
+            <div className="mt-3 flex gap-2">
+              <select
+                aria-label="Invigilator to assign"
+                value={invigilatorToAssign}
+                onChange={(e) => setInvigilatorToAssign(e.target.value)}
+                disabled={!examId}
+                className="min-w-0 flex-1 rounded-lg border border-stone-200 px-3 py-2 text-sm outline-none focus:border-rose-400 disabled:bg-stone-50"
+              >
+                <option value="">Select teacher…</option>
+                {teachers
+                  .filter((t) => !invigilators.some((i) => i.teacherId === t.id))
+                  .map((t) => (
+                    <option key={t.id} value={t.id}>
+                      {fullName(t.firstName, t.lastName)}
+                    </option>
+                  ))}
+              </select>
+              <button
+                type="button"
+                disabled={!invigilatorToAssign || assignInvigilator.isPending}
+                onClick={() => assignInvigilator.mutate()}
+                className="rounded-lg bg-rose-800 px-3 py-2 text-xs font-semibold text-white hover:bg-rose-900 disabled:opacity-60"
+              >
+                Assign
+              </button>
+            </div>
           </div>
         </aside>
       </div>
 
-      {showCreateModal && (
+      {showCreate && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
           <form
-            onSubmit={handleCreateExam}
+            noValidate
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (!form.classId || !form.examDate) {
+                setFormError("Class and exam date are required.");
+                return;
+              }
+              if (form.startTime >= form.endTime) {
+                setFormError("Start time must be before end time.");
+                return;
+              }
+              createExam.mutate();
+            }}
             className="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl"
           >
-            <h3 className="text-lg font-bold text-stone-900">Create Exam</h3>
-            <div className="mt-4 space-y-3">
-              <input
-                required
-                placeholder="Subject name"
-                value={form.subject}
-                onChange={(e) => setForm((f) => ({ ...f, subject: e.target.value }))}
-                className="w-full rounded-lg border border-stone-200 px-4 py-2.5 text-sm outline-none focus:border-rose-400"
-              />
-              <div className="grid grid-cols-2 gap-3">
-                <input
-                  required
-                  placeholder="Course code"
-                  value={form.code}
-                  onChange={(e) => setForm((f) => ({ ...f, code: e.target.value }))}
-                  className="w-full rounded-lg border border-stone-200 px-4 py-2.5 text-sm outline-none focus:border-rose-400"
-                />
-                <input
-                  required
-                  placeholder="Department"
-                  value={form.department}
-                  onChange={(e) => setForm((f) => ({ ...f, department: e.target.value }))}
-                  className="w-full rounded-lg border border-stone-200 px-4 py-2.5 text-sm outline-none focus:border-rose-400"
-                />
+            <div className="flex items-start justify-between">
+              <div>
+                <h3 className="text-lg font-bold text-stone-900">Create Exam</h3>
+                <p className="mt-1 text-sm text-stone-500">
+                  The semester is taken from the selected class.
+                </p>
               </div>
-              <div className="grid grid-cols-2 gap-3">
-                <input
-                  required
-                  type="date"
-                  value={form.date}
-                  onChange={(e) => setForm((f) => ({ ...f, date: e.target.value }))}
-                  className="w-full rounded-lg border border-stone-200 px-4 py-2.5 text-sm outline-none focus:border-rose-400"
-                />
-                <input
-                  placeholder="e.g. 09:00 AM - 12:00 PM"
-                  value={form.time}
-                  onChange={(e) => setForm((f) => ({ ...f, time: e.target.value }))}
-                  className="w-full rounded-lg border border-stone-200 px-4 py-2.5 text-sm outline-none focus:border-rose-400"
-                />
-              </div>
-            </div>
-            <div className="mt-5 flex items-center justify-end gap-4">
               <button
                 type="button"
-                onClick={() => setShowCreateModal(false)}
+                onClick={() => setShowCreate(false)}
+                aria-label="Close"
+                className="text-stone-400 hover:text-stone-600"
+              >
+                <XIcon className="h-5 w-5" />
+              </button>
+            </div>
+
+            <div className="mt-5 space-y-3">
+              <div>
+                <label
+                  htmlFor="exam-class"
+                  className="mb-1.5 block text-xs font-bold uppercase tracking-wide text-stone-500"
+                >
+                  Class
+                </label>
+                <select
+                  id="exam-class"
+                  value={form.classId}
+                  onChange={(e) => setForm((f) => ({ ...f, classId: e.target.value }))}
+                  disabled={classesQuery.isLoading}
+                  className="w-full rounded-lg border border-stone-200 bg-white px-4 py-2.5 text-sm outline-none focus:border-rose-400 disabled:bg-stone-50"
+                >
+                  <option value="">Select class…</option>
+                  {classes.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.course.code} — {c.semester.name}
+                    </option>
+                  ))}
+                </select>
+                {selectedClass && (
+                  <p className="mt-1.5 text-xs text-stone-500">
+                    Semester: {selectedClass.semester.name}
+                  </p>
+                )}
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label
+                    htmlFor="exam-type"
+                    className="mb-1.5 block text-xs font-bold uppercase tracking-wide text-stone-500"
+                  >
+                    Type
+                  </label>
+                  <select
+                    id="exam-type"
+                    value={form.examType}
+                    onChange={(e) => setForm((f) => ({ ...f, examType: e.target.value }))}
+                    className="w-full rounded-lg border border-stone-200 bg-white px-4 py-2.5 text-sm outline-none focus:border-rose-400"
+                  >
+                    {EXAM_TYPE_OPTIONS.map((o) => (
+                      <option key={o.value} value={o.value}>
+                        {o.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label
+                    htmlFor="exam-date"
+                    className="mb-1.5 block text-xs font-bold uppercase tracking-wide text-stone-500"
+                  >
+                    Date
+                  </label>
+                  <input
+                    id="exam-date"
+                    type="date"
+                    required
+                    value={form.examDate}
+                    onChange={(e) => setForm((f) => ({ ...f, examDate: e.target.value }))}
+                    className="w-full rounded-lg border border-stone-200 px-4 py-2.5 text-sm outline-none focus:border-rose-400"
+                  />
+                </div>
+                <div>
+                  <label
+                    htmlFor="exam-start"
+                    className="mb-1.5 block text-xs font-bold uppercase tracking-wide text-stone-500"
+                  >
+                    Start
+                  </label>
+                  <input
+                    id="exam-start"
+                    type="time"
+                    required
+                    value={form.startTime}
+                    onChange={(e) => setForm((f) => ({ ...f, startTime: e.target.value }))}
+                    className="w-full rounded-lg border border-stone-200 px-4 py-2.5 text-sm outline-none focus:border-rose-400"
+                  />
+                </div>
+                <div>
+                  <label
+                    htmlFor="exam-end"
+                    className="mb-1.5 block text-xs font-bold uppercase tracking-wide text-stone-500"
+                  >
+                    End
+                  </label>
+                  <input
+                    id="exam-end"
+                    type="time"
+                    required
+                    value={form.endTime}
+                    onChange={(e) => setForm((f) => ({ ...f, endTime: e.target.value }))}
+                    className="w-full rounded-lg border border-stone-200 px-4 py-2.5 text-sm outline-none focus:border-rose-400"
+                  />
+                </div>
+              </div>
+            </div>
+
+            {formError && (
+              <p className="mt-3 text-sm font-medium text-rose-600">{formError}</p>
+            )}
+
+            <div className="mt-6 flex items-center justify-end gap-4">
+              <button
+                type="button"
+                onClick={() => setShowCreate(false)}
                 className="text-sm font-semibold text-stone-500 hover:text-stone-700"
               >
                 Cancel
               </button>
               <button
                 type="submit"
-                className="rounded-lg bg-rose-800 px-5 py-2.5 text-sm font-semibold text-white hover:bg-rose-900"
+                disabled={createExam.isPending}
+                className="rounded-lg bg-rose-800 px-5 py-2.5 text-sm font-semibold text-white hover:bg-rose-900 disabled:opacity-60"
               >
-                Create Exam
+                {createExam.isPending ? "Creating…" : "Create Exam"}
               </button>
             </div>
           </form>
         </div>
       )}
 
-      {assignModalFor && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
-          <div className="w-full max-w-sm rounded-2xl bg-white p-6 shadow-xl">
-            <h3 className="text-lg font-bold text-stone-900">
-              {assignModalFor.kind === "room" ? "Assign Room" : "Assign Invigilator"}
-            </h3>
-            <p className="mt-1 text-sm text-stone-500">
-              {assignModalFor.exam.subject} ({assignModalFor.exam.code})
-            </p>
-            <ul className="mt-4 space-y-2">
-              {(assignModalFor.kind === "room" ? ROOM_OPTIONS : INVIGILATOR_OPTIONS).map(
-                (option) => (
-                  <li key={option}>
-                    <button
-                      type="button"
-                      onClick={() => confirmAssignment(option)}
-                      className="w-full rounded-lg border border-stone-200 px-4 py-2.5 text-left text-sm font-medium text-stone-700 hover:border-rose-300 hover:bg-rose-50"
-                    >
-                      {option}
-                    </button>
-                  </li>
-                ),
-              )}
-            </ul>
-            <button
-              type="button"
-              onClick={() => setAssignModalFor(null)}
-              className="mt-4 text-sm font-semibold text-stone-500 hover:text-stone-700"
-            >
-              Cancel
-            </button>
-          </div>
+      {toast && (
+        <div className="fixed bottom-6 right-6 z-50 flex items-center gap-3 rounded-xl bg-emerald-600 px-5 py-4 text-white shadow-xl">
+          <CheckCircleIcon className="h-6 w-6 shrink-0" />
+          <p className="font-semibold">{toast}</p>
         </div>
       )}
     </div>

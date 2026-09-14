@@ -56,6 +56,7 @@ export class ApiRequestError extends Error {
 
 export interface ApiFetchOptions {
   method?: "GET" | "POST" | "PATCH" | "PUT" | "DELETE";
+  /** JSON-serialised, unless it is a FormData — then sent as multipart. */
   body?: unknown;
   query?: Record<string, string | number | boolean | null | undefined>;
   signal?: AbortSignal;
@@ -122,14 +123,26 @@ async function rawFetch(
   opts: ApiFetchOptions,
 ): Promise<Response> {
   const headers: Record<string, string> = {};
-  if (opts.body !== undefined) headers["Content-Type"] = "application/json";
+  const isMultipart = opts.body instanceof FormData;
+
+  // The browser must set Content-Type for FormData so it can append the
+  // multipart boundary; setting it by hand breaks the upload.
+  if (opts.body !== undefined && !isMultipart) {
+    headers["Content-Type"] = "application/json";
+  }
   if (accessToken) headers["Authorization"] = `Bearer ${accessToken}`;
+
+  const body = isMultipart
+    ? (opts.body as FormData)
+    : opts.body !== undefined
+      ? JSON.stringify(opts.body)
+      : undefined;
 
   return fetch(buildUrl(path, opts.query), {
     method: opts.method ?? "GET",
     credentials: "include",
     headers,
-    body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined,
+    body,
     signal: opts.signal,
   });
 }

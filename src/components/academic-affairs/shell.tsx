@@ -2,13 +2,16 @@
 
 import { usePathname } from "next/navigation";
 import { DashboardShell } from "@/components/dashboard-shell";
-import { ClipboardIcon, GridIcon } from "@/components/icons";
+import { ClipboardIcon, GridIcon, LayersIcon } from "@/components/icons";
+import { useAuth } from "@/lib/auth/auth-context";
+import { roleLabel } from "@/lib/auth/roles";
 
 function isDashboardActive(pathname: string) {
-  return (
-    pathname === "/academic-affairs" ||
-    pathname.startsWith("/academic-affairs/program-setup")
-  );
+  return pathname === "/academic-affairs";
+}
+
+function isProgramSetupActive(pathname: string) {
+  return pathname.startsWith("/academic-affairs/program-setup");
 }
 
 function isSchedulingActive(pathname: string) {
@@ -21,6 +24,7 @@ export function AcademicAffairsShell({
   children: React.ReactNode;
 }) {
   const pathname = usePathname();
+  const { user } = useAuth();
 
   const navItems = [
     {
@@ -35,14 +39,20 @@ export function AcademicAffairsShell({
       icon: ClipboardIcon,
       active: isSchedulingActive(pathname),
     },
+    {
+      href: "/academic-affairs/program-setup",
+      label: "Program Setup",
+      icon: LayersIcon,
+      active: isProgramSetupActive(pathname),
+    },
   ];
 
   return (
     <DashboardShell
       homeHref="/academic-affairs"
       navItems={navItems}
-      userName="AAO"
-      userRole="Academic Affair"
+      userName={user ? `${user.firstName} ${user.lastName}` : "Academic Affairs"}
+      userRole={user ? roleLabel(user.role) : "Academic Affairs"}
     >
       {children}
     </DashboardShell>
