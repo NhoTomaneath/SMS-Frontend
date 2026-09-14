@@ -1,307 +1,351 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import { useMemo } from "react";
+import { IconStatCard } from "@/components/icon-stat-card";
 import { PageHeader } from "@/components/page-header";
+import { StatusBadge } from "@/components/status-badge";
 import {
-  CheckCircleIcon,
-  ChevronLeftIcon,
-  ChevronRightIcon,
-  EnvelopeIcon,
-  EditIcon,
-  FlaskIcon,
-  QuizIcon,
+  BarChartIcon,
+  CalendarIcon,
+  ClipboardIcon,
+  GraduationCapIcon,
 } from "@/components/icons";
+import { useApiQuery } from "@/lib/api/hooks";
+import type { StudentDashboardDTO } from "@/lib/api/types";
 import {
-  academicStanding,
-  attendance,
-  coursework,
-  facultyContacts,
-  noticeBoard,
-  timetableDays,
-  timetableEvents,
-  timetableSlots,
-  todayIndex,
-  type CourseworkItem,
+  WEEK_DAYS,
+  courseworkLabel,
+  courseworkTone,
+  fromApiOwnAssignment,
+  fromApiOwnTimetable,
+  todayName,
 } from "@/lib/student/dashboard-data";
-import { resultsHistory } from "@/lib/student/exams-data";
+import { percentOf } from "@/lib/format";
 
-const courseworkIcons: Record<CourseworkItem["icon"], typeof FlaskIcon> = {
-  flask: FlaskIcon,
-  quiz: QuizIcon,
-  edit: EditIcon,
+const STUDENT_KEY = ["student"] as const;
+
+const YEAR_LABEL: Record<string, string> = {
+  FR: "Freshman",
+  SO: "Sophomore",
+  JR: "Junior",
+  SR: "Senior",
 };
 
-function downloadTranscript() {
-  const lines = ["Unofficial Transcript Summary", ""];
-  for (const semester of resultsHistory) {
-    lines.push(`${semester.semester} (${semester.completedDate}) — GPA ${semester.gpa}`);
-    for (const course of semester.courses) {
-      lines.push(`  ${course.name}: ${course.grade}`);
-    }
-    lines.push("");
-  }
-  const blob = new Blob([lines.join("\n")], { type: "text/plain;charset=utf-8;" });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = "unofficial-transcript.txt";
-  link.click();
-  URL.revokeObjectURL(url);
-}
-
 export default function StudentDashboard() {
-  const [week, setWeek] = useState(0);
-  const weekLabels = ["Oct 23 - Oct 29", "Oct 30 - Nov 5"];
+  const dashboardQuery = useApiQuery<StudentDashboardDTO>(
+    [...STUDENT_KEY, "dashboard"],
+    "/student/me/dashboard",
+  );
 
-  const ringDegrees = (attendance.percent / 100) * 360;
+  const data = dashboardQuery.data?.data;
+
+  const slots = useMemo(
+    () => (data?.timetable ?? []).map(fromApiOwnTimetable),
+    [data?.timetable],
+  );
+
+  const coursework = useMemo(
+    () => (data?.assignments ?? []).map(fromApiOwnAssignment),
+    [data?.assignments],
+  );
+
+  const today = todayName();
+  const todaySlots = slots
+    .filter((s) => s.day === today)
+    .sort((a, b) => a.startTime.localeCompare(b.startTime));
+
+  const attendance = data?.attendance;
+  const standing = data?.academicStanding;
+
+  if (dashboardQuery.isError) {
+    return (
+      <div>
+        <PageHeader title="My Dashboard" description="Your timetable, attendance, and coursework." />
+        <div className="rounded-2xl border border-rose-200 bg-rose-50 p-8 text-center">
+          <p className="font-semibold text-rose-800">
+            {dashboardQuery.error.message}
+          </p>
+          <button
+            type="button"
+            onClick={() => dashboardQuery.refetch()}
+            className="mt-4 rounded-lg bg-rose-800 px-5 py-2.5 text-sm font-semibold text-white hover:bg-rose-900"
+          >
+            Retry
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div>
       <PageHeader
-        title="Student Dashboard"
-        description="Welcome back, Alex. You have 3 assignments due this week."
-        actions={
-          <>
-            <button
-              type="button"
-              className="rounded-lg border border-stone-300 px-5 py-2.5 text-sm font-semibold text-stone-600 hover:bg-stone-50"
-            >
-              View Full Profile
-            </button>
-            <button
-              type="button"
-              onClick={downloadTranscript}
-              className="rounded-lg bg-rose-800 px-5 py-2.5 text-sm font-semibold text-white hover:bg-rose-900"
-            >
-              Download Transcript
-            </button>
-          </>
+        title={
+          data ? `Welcome back, ${data.profile.firstName}` : "My Dashboard"
         }
+        description="Your timetable, attendance, and coursework at a glance."
       />
 
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-        <section className="rounded-2xl border border-stone-200 bg-white p-6">
-          <div className="flex items-center justify-between">
-            <h2 className="text-sm font-bold uppercase tracking-wide text-stone-500">
-              Attendance Tracking
-            </h2>
-            <span className="flex h-7 w-7 items-center justify-center rounded-full bg-emerald-600 text-white">
-              <CheckCircleIcon className="h-4 w-4" />
-            </span>
-          </div>
-          <div className="mt-6 flex flex-col items-center">
-            <div
-              className="flex h-40 w-40 items-center justify-center rounded-full"
-              style={{
-                background: `conic-gradient(#9f1239 ${ringDegrees}deg, #f3d9de ${ringDegrees}deg)`,
-              }}
-            >
-              <div className="flex h-32 w-32 flex-col items-center justify-center rounded-full bg-white">
-                <span className="text-3xl font-extrabold text-stone-900">
-                  {attendance.percent}%
-                </span>
-                <span className="text-xs font-semibold text-stone-400">PRESENT</span>
-              </div>
-            </div>
-            <p className="mt-4 text-2xl font-bold text-stone-900">{attendance.label}</p>
-            <p className="text-sm text-stone-500">
-              {attendance.attended}/{attendance.total} Lectures attended
-            </p>
-          </div>
-          <div className="mt-6 flex items-center justify-between border-t border-stone-200 pt-4 text-sm">
-            <span className="flex items-center gap-1.5 font-semibold text-emerald-600">
-              <span className="h-2 w-2 rounded-full bg-emerald-600" />
-              On Track
-            </span>
-            <span className="font-semibold text-emerald-600">{attendance.trend}</span>
-          </div>
-        </section>
-
-        <section className="rounded-2xl border border-stone-200 bg-white p-6">
-          <div className="flex items-center justify-between">
-            <h2 className="text-sm font-bold uppercase tracking-wide text-stone-500">
-              Assigned Coursework
-            </h2>
-            <Link href="#" className="text-sm font-semibold text-rose-700 hover:underline">
-              View All →
-            </Link>
-          </div>
-          <ul className="mt-4 divide-y divide-stone-100">
-            {coursework.map((item) => {
-              const Icon = courseworkIcons[item.icon];
-              return (
-                <li key={item.id} className="flex items-center gap-4 py-4">
-                  <span
-                    className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl ${item.iconColorClassName}`}
-                  >
-                    <Icon className="h-5 w-5" />
-                  </span>
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate font-semibold text-stone-900">{item.title}</p>
-                    <p className="text-sm text-stone-500">{item.courseLabel}</p>
-                  </div>
-                  <div className="shrink-0 text-right">
-                    <p className="text-sm font-semibold text-rose-700">{item.dueLabel}</p>
-                    <p className="text-xs text-stone-400">{item.dueDate}</p>
-                  </div>
-                  <span
-                    className={`shrink-0 rounded-full px-3 py-1 text-xs font-bold ${item.badgeColorClassName}`}
-                  >
-                    {item.badge}
-                  </span>
-                </li>
-              );
-            })}
-          </ul>
-        </section>
+      <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <IconStatCard
+          icon={ClipboardIcon}
+          label="Attendance"
+          value={
+            dashboardQuery.isLoading || !attendance ? "—" : `${attendance.percent}%`
+          }
+          {...(attendance
+            ? {
+                trend: attendance.label,
+                trendTone:
+                  attendance.label === "At Risk" ? ("warning" as const) : undefined,
+              }
+            : {})}
+        />
+        <IconStatCard
+          icon={GraduationCapIcon}
+          iconBgClassName="bg-sky-50 text-sky-600"
+          label="Cumulative GPA"
+          value={
+            dashboardQuery.isLoading
+              ? "—"
+              : standing?.cumulativeGpa != null
+                ? standing.cumulativeGpa.toFixed(2)
+                : "No grades yet"
+          }
+          {...(standing ? { trend: `${standing.completedCourses} courses` } : {})}
+        />
+        <IconStatCard
+          icon={BarChartIcon}
+          label="Year Level"
+          value={
+            dashboardQuery.isLoading || !standing
+              ? "—"
+              : (YEAR_LABEL[standing.yearLevel] ?? standing.yearLevel)
+          }
+          {...(standing ? { trend: `${standing.semesterCount} semesters` } : {})}
+        />
+        <IconStatCard
+          icon={CalendarIcon}
+          label="Classes Today"
+          value={dashboardQuery.isLoading ? "—" : String(todaySlots.length)}
+        />
       </div>
 
-      <section className="mt-6 rounded-2xl border border-stone-200 bg-white p-6">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <h2 className="text-sm font-bold uppercase tracking-wide text-stone-500">
-            Weekly Timetable
-          </h2>
-          <div className="flex items-center gap-3 text-sm font-semibold text-stone-600">
-            <button
-              type="button"
-              onClick={() => setWeek((w) => Math.max(0, w - 1))}
-              aria-label="Previous week"
-              className="text-stone-400 hover:text-stone-600"
-            >
-              <ChevronLeftIcon className="h-4 w-4" />
-            </button>
-            {weekLabels[week]}
-            <button
-              type="button"
-              onClick={() => setWeek((w) => Math.min(weekLabels.length - 1, w + 1))}
-              aria-label="Next week"
-              className="text-stone-400 hover:text-stone-600"
-            >
-              <ChevronRightIcon className="h-4 w-4" />
-            </button>
-          </div>
-        </div>
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-[1fr_340px]">
+        <div className="space-y-6">
+          <section className="rounded-2xl border border-stone-200 bg-white p-6">
+            <h2 className="text-xl font-bold text-stone-900">Weekly Timetable</h2>
+            <p className="text-sm text-stone-500">
+              Published classes for the courses you are registered in.
+            </p>
 
-        <div className="mt-4 overflow-x-auto">
-          <table className="w-full min-w-[760px] table-fixed border-collapse text-left text-sm">
-            <thead>
-              <tr>
-                <th className="w-24 border-b border-stone-200 py-3" />
-                {timetableDays.map((day, i) => (
-                  <th
-                    key={day}
-                    className={`border-b border-l border-stone-200 px-3 py-3 text-sm font-semibold ${
-                      i === todayIndex ? "bg-rose-50 text-rose-800" : "text-stone-700"
-                    }`}
-                  >
-                    {day}
-                    {i === todayIndex && " (Today)"}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {timetableSlots.map((slot) => (
-                <tr key={slot}>
-                  <td className="border-b border-stone-200 px-2 py-4 align-top text-xs font-semibold text-stone-500">
-                    {slot}
-                  </td>
-                  {timetableDays.map((day, i) => {
-                    const event = timetableEvents.find(
-                      (e) => e.day === day && e.slot === slot,
-                    );
-                    return (
-                      <td
-                        key={day}
-                        className={`relative h-20 border-b border-l border-stone-200 p-1.5 align-top ${
-                          i === todayIndex ? "bg-rose-50/40" : ""
+            {dashboardQuery.isLoading ? (
+              <p className="mt-6 text-sm text-stone-400">Loading…</p>
+            ) : slots.length === 0 ? (
+              <p className="mt-6 text-sm text-stone-400">
+                No published timetable entries yet.
+              </p>
+            ) : (
+              <div className="mt-5 space-y-5">
+                {WEEK_DAYS.map((day) => {
+                  const daySlots = slots
+                    .filter((s) => s.day === day)
+                    .sort((a, b) => a.startTime.localeCompare(b.startTime));
+                  if (daySlots.length === 0) return null;
+                  return (
+                    <div key={day}>
+                      <p
+                        className={`text-xs font-bold uppercase tracking-wide ${
+                          day === today ? "text-rose-700" : "text-stone-400"
                         }`}
                       >
-                        {i === todayIndex && slot === "12:00 PM" && (
-                          <div className="absolute left-0 right-0 top-1/2 z-10 flex items-center">
-                            <span className="h-2.5 w-2.5 -translate-x-1 rounded-full bg-rose-700" />
-                            <span className="h-px flex-1 bg-rose-700" />
-                          </div>
-                        )}
-                        {event && (
-                          <div
-                            className={`h-full rounded-md border-l-4 px-2.5 py-2 text-xs ${event.colorClassName}`}
+                        {day}
+                        {day === today && " · Today"}
+                      </p>
+                      <ul className="mt-2 space-y-2">
+                        {daySlots.map((slot) => (
+                          <li
+                            key={slot.id}
+                            className={`flex flex-wrap items-center justify-between gap-3 rounded-xl border-l-4 p-3 ${
+                              day === today
+                                ? "border-rose-600 bg-rose-50"
+                                : "border-stone-200 bg-stone-50"
+                            }`}
                           >
-                            <p className="font-bold">{event.title}</p>
-                            {event.location && (
-                              <p className="mt-0.5 opacity-80">{event.location}</p>
-                            )}
-                          </div>
-                        )}
-                      </td>
-                    );
-                  })}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </section>
+                            <div className="min-w-0">
+                              <p className="font-bold text-stone-800">{slot.code}</p>
+                              <p className="truncate text-xs text-stone-500">
+                                {slot.name}
+                              </p>
+                            </div>
+                            <p className="text-xs font-semibold text-stone-600">
+                              {slot.startTime}–{slot.endTime} · {slot.room}
+                            </p>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </section>
 
-      <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-2">
-        <section className="rounded-2xl border border-stone-200 bg-white p-6">
-          <h2 className="text-sm font-bold uppercase tracking-wide text-stone-500">
-            Faculty Contacts
-          </h2>
-          <ul className="mt-4 space-y-3">
-            {facultyContacts.map((contact) => (
-              <li key={contact.id} className="flex items-center gap-3">
-                <span
-                  className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-sm font-bold ${contact.colorClassName}`}
-                >
-                  {contact.initials}
-                </span>
-                <div className="flex-1">
-                  <p className="font-semibold text-stone-900">{contact.name}</p>
-                  <p className="text-sm text-stone-500">{contact.role}</p>
-                </div>
-                <a
-                  href={`mailto:${contact.email}`}
-                  aria-label={`Email ${contact.name}`}
-                  className="text-rose-700 hover:text-rose-900"
-                >
-                  <EnvelopeIcon className="h-5 w-5" />
-                </a>
-              </li>
-            ))}
-          </ul>
-          <div className="mt-4 rounded-xl bg-rose-50 p-4">
-            <p className="text-sm font-bold text-rose-700">Notice Board</p>
-            <p className="mt-1 text-sm text-stone-600">{noticeBoard}</p>
-          </div>
-        </section>
-
-        <section className="relative overflow-hidden rounded-2xl bg-rose-800 p-6 text-white">
-          <p className="text-sm font-bold uppercase tracking-wide text-rose-100">
-            Academic Standing
-          </p>
-          <div className="mt-4 flex items-center gap-4">
-            <span className="text-5xl font-extrabold">{academicStanding.gpa}</span>
-            <span className="rounded-full bg-rose-700 px-4 py-1.5 text-sm font-semibold">
-              Cumulative GPA
-            </span>
-          </div>
-          <div className="mt-14 flex items-center justify-between text-sm font-bold uppercase tracking-wide text-rose-200">
-            {academicStanding.yearMarkers.map((marker, i) => (
-              <span
-                key={marker}
-                className={
-                  i === academicStanding.currentYearIndex
-                    ? "text-white"
-                    : "text-rose-300"
-                }
+          <section className="rounded-2xl border border-stone-200 bg-white">
+            <div className="flex items-center justify-between border-b border-stone-200 p-6">
+              <h2 className="text-xl font-bold text-stone-900">
+                Assigned Coursework
+              </h2>
+              <StatusBadge label={`${coursework.length} items`} tone="rose" />
+            </div>
+            {dashboardQuery.isLoading ? (
+              <p className="p-6 text-sm text-stone-400">Loading…</p>
+            ) : coursework.length === 0 ? (
+              <p className="p-6 text-sm text-stone-400">
+                Nothing assigned right now.
+              </p>
+            ) : (
+              <ul className="divide-y divide-stone-100">
+                {coursework.map((item) => (
+                  <li
+                    key={item.id}
+                    className="flex flex-wrap items-center justify-between gap-3 p-5"
+                  >
+                    <div className="min-w-0">
+                      <p className="font-semibold text-stone-800">{item.title}</p>
+                      <p className="truncate text-xs text-stone-500">
+                        {item.courseLabel}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-4">
+                      <div className="text-right">
+                        <p className="text-xs text-stone-500">Due {item.dueLabel}</p>
+                        <p className="text-xs font-semibold text-stone-700">
+                          {item.score === null
+                            ? `${item.maxScore} marks`
+                            : `${item.score}/${item.maxScore}`}
+                        </p>
+                      </div>
+                      <StatusBadge
+                        label={courseworkLabel[item.status]}
+                        tone={courseworkTone[item.status]}
+                      />
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
+            <div className="border-t border-stone-200 p-4 text-center">
+              <Link
+                href="/student/exams-results"
+                className="text-sm font-semibold text-rose-700 hover:underline"
               >
-                {marker}
-              </span>
-            ))}
+                View exams &amp; results
+              </Link>
+            </div>
+          </section>
+        </div>
+
+        <aside className="space-y-6">
+          <div className="rounded-2xl border border-stone-200 bg-white p-6">
+            <h3 className="text-lg font-bold text-stone-900">Attendance</h3>
+            {attendance ? (
+              <>
+                <p className="mt-3 text-3xl font-extrabold text-stone-900">
+                  {attendance.percent}%
+                </p>
+                <div className="mt-2 h-2 w-full overflow-hidden rounded-full bg-stone-100">
+                  <div
+                    className={`h-full rounded-full ${
+                      attendance.percent >= 85
+                        ? "bg-emerald-600"
+                        : attendance.percent >= 75
+                          ? "bg-amber-500"
+                          : "bg-rose-700"
+                    }`}
+                    style={{ width: `${attendance.percent}%` }}
+                  />
+                </div>
+                <dl className="mt-4 space-y-1.5 text-sm">
+                  {[
+                    ["Present", attendance.present],
+                    ["Late", attendance.late],
+                    ["Absent", attendance.absent],
+                    ["Excused", attendance.excused],
+                  ].map(([label, count]) => (
+                    <div key={String(label)} className="flex justify-between">
+                      <dt className="text-stone-500">{label}</dt>
+                      <dd className="font-semibold text-stone-800">
+                        {count}
+                        <span className="ml-1.5 text-xs font-normal text-stone-400">
+                          {percentOf(Number(count), attendance.total)}%
+                        </span>
+                      </dd>
+                    </div>
+                  ))}
+                </dl>
+              </>
+            ) : (
+              <p className="mt-3 text-sm text-stone-400">
+                {dashboardQuery.isLoading ? "Loading…" : "No attendance recorded."}
+              </p>
+            )}
           </div>
-        </section>
+
+          <div className="rounded-2xl border border-stone-200 bg-white p-6">
+            <h3 className="text-sm font-bold uppercase tracking-wide text-stone-500">
+              My Record
+            </h3>
+            {data ? (
+              <dl className="mt-3 space-y-2 text-sm">
+                <div className="flex justify-between">
+                  <dt className="text-stone-500">Student number</dt>
+                  <dd className="font-mono font-semibold text-stone-800">
+                    {data.profile.studentNumber}
+                  </dd>
+                </div>
+                <div className="flex justify-between">
+                  <dt className="text-stone-500">Department</dt>
+                  <dd className="text-stone-700">
+                    {data.profile.department?.name ?? "—"}
+                  </dd>
+                </div>
+                <div className="flex justify-between">
+                  <dt className="text-stone-500">Status</dt>
+                  <dd>
+                    <StatusBadge
+                      label={data.profile.status.replace("_", " ")}
+                      tone={data.profile.status === "ENROLLED" ? "green" : "amber"}
+                    />
+                  </dd>
+                </div>
+              </dl>
+            ) : (
+              <p className="mt-3 text-sm text-stone-400">Loading…</p>
+            )}
+          </div>
+
+          <div className="rounded-2xl border border-stone-200 bg-white p-6">
+            <h3 className="text-sm font-bold uppercase tracking-wide text-stone-500">
+              Quick Links
+            </h3>
+            <div className="mt-4 flex flex-col gap-2">
+              <Link
+                href="/student/exams-results"
+                className="rounded-lg border border-stone-200 px-4 py-2.5 text-sm font-semibold text-stone-700 hover:bg-stone-50"
+              >
+                Exams &amp; Results
+              </Link>
+              <Link
+                href="/student/graduation-status"
+                className="rounded-lg border border-stone-200 px-4 py-2.5 text-sm font-semibold text-stone-700 hover:bg-stone-50"
+              >
+                Graduation Status
+              </Link>
+            </div>
+          </div>
+        </aside>
       </div>
     </div>
   );

@@ -3,6 +3,8 @@
 import { usePathname } from "next/navigation";
 import { DashboardShell } from "@/components/dashboard-shell";
 import { BarChartIcon, BriefcaseIcon, FileTextIcon } from "@/components/icons";
+import { useAuth } from "@/lib/auth/auth-context";
+import { roleLabel } from "@/lib/auth/roles";
 
 function isAnalyticsActive(pathname: string) {
   return pathname === "/principal";
@@ -18,6 +20,7 @@ function isReportsActive(pathname: string) {
 
 export function PrincipalShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
+  const { user } = useAuth();
 
   const navItems = [
     {
@@ -44,8 +47,8 @@ export function PrincipalShell({ children }: { children: React.ReactNode }) {
     <DashboardShell
       homeHref="/principal"
       navItems={navItems}
-      userName="Principal Name"
-      userRole="Principal"
+      userName={user ? `${user.firstName} ${user.lastName}` : "Principal"}
+      userRole={user ? roleLabel(user.role) : "Principal"}
     >
       {children}
     </DashboardShell>
