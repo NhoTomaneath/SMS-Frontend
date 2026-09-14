@@ -27,6 +27,10 @@ import {
 const ACCOUNTS_KEY = ["admin", "accounts"] as const;
 const PAGE_SIZE = 20;
 
+/** Shared styling for the Create New User form fields. */
+const fieldClass =
+  "w-full rounded-lg border border-stone-300 bg-white px-3.5 py-2.5 text-sm text-stone-900 placeholder:text-stone-400 outline-none transition focus:border-rose-500 focus:ring-2 focus:ring-rose-100";
+
 interface NewUserForm {
   firstName: string;
   lastName: string;
@@ -388,79 +392,105 @@ export default function ManageUserAccountsPage() {
       </section>
 
       {showModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-stone-900/50 p-4 backdrop-blur-sm">
           <form
             onSubmit={handleCreateUser}
-            className="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl"
+            className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl ring-1 ring-stone-900/5"
           >
             <h3 className="text-lg font-bold text-stone-900">Create New User</h3>
-            <div className="mt-4 space-y-3">
+            <p className="mt-1 text-sm text-stone-500">
+              The user signs in with these credentials and can change the password later.
+            </p>
+
+            <div className="mt-5 space-y-4">
               <div className="flex gap-3">
-                <input
-                  required
-                  placeholder="First name"
-                  value={form.firstName}
-                  onChange={(e) =>
-                    setForm((f) => ({ ...f, firstName: e.target.value }))
-                  }
-                  className="w-full rounded-lg border border-stone-200 px-4 py-2.5 text-sm outline-none focus:border-rose-400"
-                />
-                <input
-                  required
-                  placeholder="Last name"
-                  value={form.lastName}
-                  onChange={(e) =>
-                    setForm((f) => ({ ...f, lastName: e.target.value }))
-                  }
-                  className="w-full rounded-lg border border-stone-200 px-4 py-2.5 text-sm outline-none focus:border-rose-400"
-                />
+                <label className="flex-1 space-y-1.5">
+                  <span className="text-sm font-medium text-stone-700">First name</span>
+                  <input
+                    required
+                    placeholder="Jane"
+                    value={form.firstName}
+                    onChange={(e) =>
+                      setForm((f) => ({ ...f, firstName: e.target.value }))
+                    }
+                    className={fieldClass}
+                  />
+                </label>
+                <label className="flex-1 space-y-1.5">
+                  <span className="text-sm font-medium text-stone-700">Last name</span>
+                  <input
+                    required
+                    placeholder="Doe"
+                    value={form.lastName}
+                    onChange={(e) =>
+                      setForm((f) => ({ ...f, lastName: e.target.value }))
+                    }
+                    className={fieldClass}
+                  />
+                </label>
               </div>
-              <input
-                required
-                type="email"
-                placeholder="Email address"
-                value={form.email}
-                onChange={(e) => setForm((f) => ({ ...f, email: e.target.value }))}
-                className="w-full rounded-lg border border-stone-200 px-4 py-2.5 text-sm outline-none focus:border-rose-400"
-              />
-              <input
-                required
-                type="password"
-                minLength={8}
-                placeholder="Temporary password (min 8 chars)"
-                value={form.password}
-                onChange={(e) =>
-                  setForm((f) => ({ ...f, password: e.target.value }))
-                }
-                className="w-full rounded-lg border border-stone-200 px-4 py-2.5 text-sm outline-none focus:border-rose-400"
-              />
-              <select
-                value={form.role}
-                onChange={(e) =>
-                  setForm((f) => ({ ...f, role: e.target.value as BackendRole }))
-                }
-                className="w-full rounded-lg border border-stone-200 bg-white px-4 py-2.5 text-sm outline-none focus:border-rose-400"
-              >
-                {ROLE_OPTIONS.map((r) => (
-                  <option key={r.value} value={r.value}>
-                    {r.label}
-                  </option>
-                ))}
-              </select>
+
+              <label className="block space-y-1.5">
+                <span className="text-sm font-medium text-stone-700">Email address</span>
+                <input
+                  required
+                  type="email"
+                  placeholder="jane.doe@kit.test"
+                  value={form.email}
+                  onChange={(e) => setForm((f) => ({ ...f, email: e.target.value }))}
+                  className={fieldClass}
+                />
+              </label>
+
+              <label className="block space-y-1.5">
+                <span className="text-sm font-medium text-stone-700">
+                  Temporary password
+                </span>
+                <input
+                  required
+                  type="password"
+                  minLength={8}
+                  placeholder="At least 8 characters"
+                  value={form.password}
+                  onChange={(e) =>
+                    setForm((f) => ({ ...f, password: e.target.value }))
+                  }
+                  className={fieldClass}
+                />
+              </label>
+
+              <label className="block space-y-1.5">
+                <span className="text-sm font-medium text-stone-700">Role</span>
+                <select
+                  value={form.role}
+                  onChange={(e) =>
+                    setForm((f) => ({ ...f, role: e.target.value as BackendRole }))
+                  }
+                  className={fieldClass}
+                >
+                  {ROLE_OPTIONS.map((r) => (
+                    <option key={r.value} value={r.value}>
+                      {r.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
               {formError && (
                 <p className="text-sm text-rose-700" role="alert">
                   {formError}
                 </p>
               )}
             </div>
-            <div className="mt-5 flex items-center justify-end gap-4">
+
+            <div className="mt-6 flex items-center justify-end gap-3">
               <button
                 type="button"
                 onClick={() => {
                   setShowModal(false);
                   setFormError(null);
                 }}
-                className="text-sm font-semibold text-stone-500 hover:text-stone-700"
+                className="rounded-lg px-4 py-2.5 text-sm font-semibold text-stone-600 hover:bg-stone-100"
               >
                 Cancel
               </button>

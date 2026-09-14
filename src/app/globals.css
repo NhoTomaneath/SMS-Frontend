@@ -1,8 +1,12 @@
 @import "tailwindcss";
 
+/* The SMS portals are designed light-only (stone / rose palette). Pin the
+   color scheme so browsers don't apply dark-mode UA styling to form controls,
+   and don't flip the foreground to near-white in OS dark mode. */
 :root {
   --background: #ffffff;
   --foreground: #171717;
+  color-scheme: light;
 }
 
 @theme inline {
@@ -10,13 +14,6 @@
   --color-foreground: var(--foreground);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
 }
 
 body {
