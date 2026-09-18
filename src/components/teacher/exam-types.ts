@@ -53,7 +53,7 @@ export interface FinalGradeItem {
   finalScore: number;
   letterGrade: string;
   gpaPoints: number;
-  status: "DRAFT" | "APPROVED" | "PUBLISHED";
+  status: "PENDING" | "RECEIVED" | "APPROVED" | "PUBLISHED";
   student: {
     id: string;
     studentNumber: string;

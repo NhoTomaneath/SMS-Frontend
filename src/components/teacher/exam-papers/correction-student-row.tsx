@@ -32,7 +32,9 @@ export function CorrectionStudentRow({ grade }: CorrectionStudentRowProps) {
       <td className="py-4">
         <StatusBadge
           label={grade.status}
-          tone={grade.status === "PUBLISHED" ? "green" : grade.status === "APPROVED" ? "sky" : "amber"}
+          tone={
+            grade.status === "PUBLISHED" ? "green" : grade.status === "APPROVED" ? "sky" : "amber"
+          }
         />
       </td>
     </tr>

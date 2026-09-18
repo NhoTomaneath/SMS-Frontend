@@ -10,6 +10,7 @@ import {
 } from "@/components/teacher/hooks/use-teacher-exams";
 import { ExamPapersHeader } from "@/components/teacher/exam-papers/exam-papers-header";
 import { DraftPapersSection } from "@/components/teacher/exam-papers/draft-papers-section";
+import { ExamScoreEntrySection } from "@/components/teacher/exam-papers/exam-score-entry-section";
 import { CorrectionHubSection } from "@/components/teacher/exam-papers/correction-hub-section";
 import { ExamPerformanceAside } from "@/components/teacher/exam-papers/exam-performance-aside";
 import { CreateExamPaperModal } from "@/components/teacher/exam-papers/create-exam-paper-modal";
@@ -27,6 +28,10 @@ export default function TeacherExamPaperPage() {
   const activeClassId = selectedClassId || classes[0]?.id || "";
   const examsQuery = useExamsList(activeClassId);
   const activeExam = useMemo(() => examsQuery.data?.data?.[0] || null, [examsQuery.data]);
+  const finalExam = useMemo(
+    () => examsQuery.data?.data?.find((e) => e.examType === "FINAL") ?? null,
+    [examsQuery.data],
+  );
 
   const papersQuery = useExamPapers(activeExam?.id);
   const papers = useMemo(() => papersQuery.data?.data ?? [], [papersQuery.data]);
@@ -57,6 +62,7 @@ export default function TeacherExamPaperPage() {
               triggerToast("Exam paper submitted to COE for review.");
             }}
           />
+          <ExamScoreEntrySection classId={activeClassId} examId={finalExam?.id} />
           <CorrectionHubSection classId={activeClassId} />
         </div>
 
