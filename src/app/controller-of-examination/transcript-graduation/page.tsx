@@ -6,6 +6,7 @@ import { PageHeader } from "@/components/page-header";
 import { StatusBadge } from "@/components/status-badge";
 import { LoadingRow, ErrorRow, EmptyRow } from "@/components/query-states";
 import { FileDropzone, UploadedFileRow } from "@/components/file-upload";
+import { EligibilityIndicator } from "@/components/coe/eligibility-indicator";
 import {
   CheckCircleIcon,
   FileTextIcon,
@@ -156,17 +157,17 @@ export default function TranscriptGraduationPage() {
   });
 
   const generateTranscript = useMutation({
-    mutationFn: ({ id, fileUrl }: { id: string; fileUrl: string }) =>
+    mutationFn: ({ id, fileUrl }: { id: string; fileUrl?: string }) =>
       apiFetch<TranscriptDTO>(`/coe/transcripts/${id}/generate`, {
         method: "PATCH",
-        body: { fileUrl },
+        body: fileUrl ? { fileUrl } : {},
       }),
     onMutate: () => setActionError(null),
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: TRANSCRIPTS_KEY });
       setGenerateFor(null);
       setTranscriptFile(null);
-      showToast("Transcript generated and attached.");
+      showToast("Transcript generated.");
     },
     onError: (err) => setActionError(errorMessage(err, "Could not generate the transcript.")),
   });
@@ -466,14 +467,15 @@ export default function TranscriptGraduationPage() {
                     <th className="px-5 py-3">Student</th>
                     <th className="px-5 py-3">Graduation Date</th>
                     <th className="px-5 py-3">Status</th>
+                    <th className="px-5 py-3">Computed Eligibility</th>
                     <th className="px-5 py-3 text-right">Set Status</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-stone-100">
-                  {recordsQuery.isLoading && <LoadingRow colSpan={4} />}
+                  {recordsQuery.isLoading && <LoadingRow colSpan={5} />}
                   {recordsQuery.isError && (
                     <ErrorRow
-                      colSpan={4}
+                      colSpan={5}
                       message={recordsQuery.error.message}
                       onRetry={() => recordsQuery.refetch()}
                     />
@@ -509,6 +511,9 @@ export default function TranscriptGraduationPage() {
                           />
                         </td>
                         <td className="px-5 py-3">
+                          <EligibilityIndicator studentId={r.studentId} />
+                        </td>
+                        <td className="px-5 py-3">
                           <div className="flex items-center justify-end gap-1.5">
                             {GRADUATION_STATUS_OPTIONS.map((o) => (
                               <button
@@ -534,7 +539,7 @@ export default function TranscriptGraduationPage() {
                   {!recordsQuery.isLoading &&
                     !recordsQuery.isError &&
                     records.length === 0 && (
-                      <EmptyRow colSpan={4} label="No records in this report." />
+                      <EmptyRow colSpan={5} label="No records in this report." />
                     )}
                 </tbody>
               </table>
@@ -804,13 +809,9 @@ export default function TranscriptGraduationPage() {
             noValidate
             onSubmit={(e) => {
               e.preventDefault();
-              if (!transcriptFile) {
-                setFormError("Upload the prepared transcript first.");
-                return;
-              }
               generateTranscript.mutate({
                 id: generateFor.id,
-                fileUrl: transcriptFile.url,
+                fileUrl: transcriptFile?.url,
               });
             }}
             className="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl"
@@ -839,6 +840,11 @@ export default function TranscriptGraduationPage() {
             </div>
 
             <div className="mt-5">
+              <p className="mb-2 text-sm text-stone-600">
+                By default the system composes a real transcript PDF from this
+                student&apos;s published grades. Only attach a file below if you
+                want to override it with a manually prepared document instead.
+              </p>
               {transcriptFile ? (
                 <UploadedFileRow
                   name={transcriptFile.name}
@@ -848,8 +854,9 @@ export default function TranscriptGraduationPage() {
                 />
               ) : (
                 <FileDropzone
+                  compact
                   accept={DOCUMENT_UPLOAD_TYPES}
-                  acceptLabel="PDF or spreadsheet, up to 5 MB"
+                  acceptLabel="Optional override — PDF or spreadsheet, up to 5 MB"
                   onUploaded={(file, original) =>
                     setTranscriptFile({
                       name: original.name,
@@ -859,11 +866,6 @@ export default function TranscriptGraduationPage() {
                   }
                 />
               )}
-              <p className="mt-2 text-xs text-stone-500">
-                The API stores the document and marks the request generated;
-                there is no server-side transcript renderer, so attach the
-                prepared file.
-              </p>
             </div>
 
             {formError && (
@@ -880,10 +882,14 @@ export default function TranscriptGraduationPage() {
               </button>
               <button
                 type="submit"
-                disabled={generateTranscript.isPending || !transcriptFile}
+                disabled={generateTranscript.isPending}
                 className="rounded-lg bg-rose-800 px-5 py-2.5 text-sm font-semibold text-white hover:bg-rose-900 disabled:opacity-60"
               >
-                {generateTranscript.isPending ? "Generating…" : "Generate"}
+                {generateTranscript.isPending
+                  ? "Generating…"
+                  : transcriptFile
+                    ? "Attach & Generate"
+                    : "Generate Transcript"}
               </button>
             </div>
           </form>
