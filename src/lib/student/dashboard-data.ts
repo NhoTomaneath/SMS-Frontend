@@ -114,9 +114,19 @@ export interface OwnExamRow {
   time: string;
   rooms: string;
   status: ExamStatusDTO;
+  /** File-submission exam flow: the finalized paper to download, once CoE has received it. */
+  examPaperUrl: string | null;
+  /** This student's own uploaded answer, if they have submitted one. */
+  mySubmission: { fileUrl: string; submittedAt: string } | null;
+  /** The real submission deadline (exam date + end time), for an open/closed check. */
+  submissionDeadline: Date;
 }
 
 export function fromApiOwnExam(dto: OwnExamDTO): OwnExamRow {
+  const deadline = new Date(dto.examDate);
+  const endTime = new Date(dto.endTime);
+  deadline.setUTCHours(endTime.getUTCHours(), endTime.getUTCMinutes(), endTime.getUTCSeconds(), 0);
+
   return {
     id: dto.id,
     code: dto.class.course.code,
@@ -127,6 +137,9 @@ export function fromApiOwnExam(dto: OwnExamDTO): OwnExamRow {
     rooms:
       dto.roomAssignments.map((r) => r.examRoom.name).join(", ") || "Room TBC",
     status: dto.status,
+    examPaperUrl: dto.examPapers[0]?.fileUrl ?? null,
+    mySubmission: dto.submissions[0] ?? null,
+    submissionDeadline: deadline,
   };
 }
 

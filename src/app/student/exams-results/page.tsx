@@ -5,6 +5,7 @@ import { PageHeader } from "@/components/page-header";
 import { StatusBadge } from "@/components/status-badge";
 import { LoadingRow, ErrorRow, EmptyRow } from "@/components/query-states";
 import { DownloadIcon } from "@/components/icons";
+import { TakeExamAction } from "@/components/student/take-exam-action";
 import { useApiQuery } from "@/lib/api/hooks";
 import type {
   OwnAcademicStandingDTO,
@@ -128,13 +129,14 @@ export default function StudentExamsResultsPage() {
                     <th className="px-6 py-3">Date &amp; Time</th>
                     <th className="px-6 py-3">Room</th>
                     <th className="px-6 py-3">Status</th>
+                    <th className="px-6 py-3">Take Exam</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-stone-100">
-                  {examsQuery.isLoading && <LoadingRow colSpan={5} />}
+                  {examsQuery.isLoading && <LoadingRow colSpan={6} />}
                   {examsQuery.isError && (
                     <ErrorRow
-                      colSpan={5}
+                      colSpan={6}
                       message={examsQuery.error.message}
                       onRetry={() => examsQuery.refetch()}
                     />
@@ -159,10 +161,13 @@ export default function StudentExamsResultsPage() {
                             tone={examTone[exam.status]}
                           />
                         </td>
+                        <td className="px-6 py-4">
+                          <TakeExamAction exam={exam} />
+                        </td>
                       </tr>
                     ))}
                   {!examsQuery.isLoading && !examsQuery.isError && exams.length === 0 && (
-                    <EmptyRow colSpan={5} label="No exams scheduled for your classes." />
+                    <EmptyRow colSpan={6} label="No exams scheduled for your classes." />
                   )}
                 </tbody>
               </table>

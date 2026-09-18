@@ -15,21 +15,13 @@ import { useApiQuery } from "@/lib/api/hooks";
 import type {
   OwnAcademicStandingDTO,
   OwnGraduationStatusDTO,
-  OwnResultDTO,
   TranscriptDTO,
 } from "@/lib/api/types";
-import {
-  fromApiOwnResult,
-  graduationTone,
-  transcriptTone,
-} from "@/lib/student/dashboard-data";
+import { graduationTone, transcriptTone } from "@/lib/student/dashboard-data";
 import { formatDate, percentOf, titleCase } from "@/lib/format";
 
 const STUDENT_KEY = ["student"] as const;
 const TRANSCRIPTS_KEY = [...STUDENT_KEY, "transcripts"] as const;
-
-/** Credits a degree requires. The API exposes no programme rule yet. */
-const CREDITS_REQUIRED = 120;
 
 function errorMessage(err: unknown, fallback: string): string {
   if (err instanceof ApiRequestError) {
@@ -51,12 +43,9 @@ export default function StudentGraduationStatusPage() {
 
   // ── Queries ───────────────────────────────────────────────────────────────
 
-  // A student with no graduation record yet gets a 404, which is a normal
-  // state here rather than an error worth retrying.
   const statusQuery = useApiQuery<OwnGraduationStatusDTO>(
     [...STUDENT_KEY, "graduation-status"],
     "/student/me/graduation-status",
-    { retry: false },
   );
 
   const standingQuery = useApiQuery<OwnAcademicStandingDTO>(
@@ -64,35 +53,22 @@ export default function StudentGraduationStatusPage() {
     "/student/me/academic-standing",
   );
 
-  const resultsQuery = useApiQuery<OwnResultDTO[]>(
-    [...STUDENT_KEY, "results"],
-    "/student/me/results",
-  );
-
   const transcriptsQuery = useApiQuery<TranscriptDTO[]>(
     TRANSCRIPTS_KEY,
     "/student/me/transcripts",
   );
 
-  const status = statusQuery.data?.data;
+  const record = statusQuery.data?.data.record;
+  const eligibility = statusQuery.data?.data.computedEligibility;
   const standing = standingQuery.data?.data;
   const transcripts = useMemo(
     () => transcriptsQuery.data?.data ?? [],
     [transcriptsQuery.data],
   );
 
-  const results = useMemo(
-    () => (resultsQuery.data?.data ?? []).map(fromApiOwnResult),
-    [resultsQuery.data],
-  );
-
-  const passed = results.filter(
-    (r) => r.status === "PUBLISHED" && r.gpaPoints > 0,
-  );
-  // One credit-equivalent per passed course: the results endpoint does not
-  // carry course credits, so this is a course count, labelled as such.
-  const creditsEarned = passed.length;
-  const completionPercent = percentOf(creditsEarned, CREDITS_REQUIRED / 3);
+  const completionPercent = eligibility
+    ? percentOf(eligibility.completedCredits, eligibility.requiredCredits)
+    : 0;
 
   const hasPendingRequest = transcripts.some((t) => t.status === "REQUESTED");
 
@@ -150,10 +126,10 @@ export default function StudentGraduationStatusPage() {
               </div>
               {statusQuery.isLoading ? (
                 <span className="text-sm text-stone-400">Checking…</span>
-              ) : status ? (
+              ) : record ? (
                 <StatusBadge
-                  label={titleCase(status.status)}
-                  tone={graduationTone[status.status]}
+                  label={titleCase(record.status)}
+                  tone={graduationTone[record.status]}
                 />
               ) : (
                 <StatusBadge label="Not Evaluated" tone="amber" />
@@ -163,9 +139,9 @@ export default function StudentGraduationStatusPage() {
             <div className="mt-8 flex flex-col items-center">
               <span
                 className={`flex h-20 w-20 items-center justify-center rounded-3xl ${
-                  status?.status === "GRADUATED"
+                  record?.status === "GRADUATED"
                     ? "bg-emerald-50 text-emerald-600"
-                    : status?.status === "NOT_ELIGIBLE"
+                    : record?.status === "NOT_ELIGIBLE"
                       ? "bg-rose-50 text-rose-600"
                       : "bg-sky-50 text-sky-600"
                 }`}
@@ -175,26 +151,51 @@ export default function StudentGraduationStatusPage() {
               <p className="mt-4 text-lg font-bold text-stone-900">
                 {statusQuery.isLoading
                   ? "Checking your record…"
-                  : status?.status === "GRADUATED"
+                  : record?.status === "GRADUATED"
                     ? "You have graduated"
-                    : status?.status === "ELIGIBLE"
+                    : record?.status === "ELIGIBLE"
                       ? "You are eligible to graduate"
-                      : status?.status === "NOT_ELIGIBLE"
+                      : record?.status === "NOT_ELIGIBLE"
                         ? "Not yet eligible"
                         : "No graduation record yet"}
               </p>
-              {status?.graduationDate && (
+              {record?.graduationDate && (
                 <p className="mt-1 text-sm text-stone-500">
-                  Graduated {formatDate(status.graduationDate)}
+                  Graduated {formatDate(record.graduationDate)}
                 </p>
               )}
-              {!status && !statusQuery.isLoading && (
+              {!record && !statusQuery.isLoading && (
                 <p className="mt-1 max-w-sm text-center text-sm text-stone-500">
                   Your record is created when the Controller of Examination
                   compiles the graduation report for your cohort.
                 </p>
               )}
             </div>
+
+            {eligibility && (
+              <div className="mt-6 rounded-xl border border-stone-200 bg-stone-50 p-4">
+                <div className="flex items-center justify-between">
+                  <p className="text-xs font-bold uppercase tracking-wide text-stone-500">
+                    Computed Eligibility Check
+                  </p>
+                  <StatusBadge
+                    label={eligibility.eligible ? "Meets Criteria" : "Not Yet Met"}
+                    tone={eligibility.eligible ? "green" : "amber"}
+                  />
+                </div>
+                <p className="mt-1.5 text-xs text-stone-500">
+                  A system-computed estimate based on your published grades — not the
+                  official decision above, which the Controller of Examination sets by hand.
+                </p>
+                {eligibility.reasons.length > 0 && (
+                  <ul className="mt-2 space-y-1 text-xs text-stone-600">
+                    {eligibility.reasons.map((reason) => (
+                      <li key={reason}>• {reason}</li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            )}
           </section>
 
           <section className="rounded-2xl border border-stone-200 bg-white p-6">
@@ -205,9 +206,9 @@ export default function StudentGraduationStatusPage() {
 
             <div className="mt-5">
               <div className="flex items-center justify-between text-sm">
-                <span className="font-medium text-stone-700">Courses passed</span>
+                <span className="font-medium text-stone-700">Credits completed</span>
                 <span className="font-bold text-stone-900">
-                  {creditsEarned} of {Math.round(CREDITS_REQUIRED / 3)}
+                  {eligibility?.completedCredits ?? 0} of {eligibility?.requiredCredits ?? "—"}
                 </span>
               </div>
               <div className="mt-2 h-2.5 w-full overflow-hidden rounded-full bg-stone-100">
@@ -217,9 +218,8 @@ export default function StudentGraduationStatusPage() {
                 />
               </div>
               <p className="mt-2 text-xs text-stone-500">
-                {completionPercent}% towards the {CREDITS_REQUIRED}-credit degree
-                requirement (counted as courses; the API exposes no per-programme
-                credit rule yet).
+                {completionPercent}% towards the {eligibility?.requiredCredits ?? "—"}-credit
+                degree requirement, from published final grades.
               </p>
             </div>
 
