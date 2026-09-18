@@ -413,7 +413,8 @@ export interface StudentDocumentDTO {
 }
 
 export interface CreateStudentBody {
-  studentNumber: string;
+  /** Omit to let the backend auto-assign a department-matched ID (requires departmentId). */
+  studentNumber?: string;
   firstName: string;
   lastName: string;
   dateOfBirth?: string;
@@ -741,6 +742,22 @@ export interface OwnExamDTO {
   roomAssignments: Array<{
     examRoom: { id: string; name: string; location: string };
   }>;
+  /** The finalized question paper to download, once CoE has received it. Empty until then. */
+  examPapers: Array<{ fileUrl: string }>;
+  /** This student's own uploaded answer file, if any. */
+  submissions: Array<{ fileUrl: string; submittedAt: string }>;
+}
+
+export interface SubmitExamAnswerBody {
+  fileUrl: string;
+}
+
+export interface ExamSubmissionDTO {
+  id: string;
+  examId: string;
+  studentId: string;
+  fileUrl: string;
+  submittedAt: string;
 }
 
 export interface OwnResultDTO {
@@ -756,12 +773,34 @@ export interface OwnResultDTO {
   class: { id: string; course: { id: string; code: string; name: string } };
 }
 
-export interface OwnGraduationStatusDTO {
+/**
+ * A computed "does this student meet standard graduation criteria" suggestion
+ * — advisory only, never written anywhere. CoE's own `GraduationRecord.status`
+ * (set by hand) is the official word; this just surfaces the GPA/credit facts
+ * next to that decision. `GET /coe/students/:studentId/eligibility`.
+ */
+export interface EligibilityDTO {
+  eligible: boolean;
+  cumulativeGpa: number | null;
+  completedCredits: number;
+  requiredCredits: number;
+  minimumGpa: number;
+  reasons: string[];
+}
+
+export interface GraduationRecordSummaryDTO {
   id: string;
   status: GraduationRecordStatusDTO;
   graduationDate: string | null;
   createdAt: string;
   graduationReportId: string | null;
+}
+
+/** `GET /student/me/graduation-status`. */
+export interface OwnGraduationStatusDTO {
+  /** Null until CoE has formally evaluated this student and created a record. */
+  record: GraduationRecordSummaryDTO | null;
+  computedEligibility: EligibilityDTO;
 }
 
 /** `GET /student/me/attendance-summary`. */
@@ -974,4 +1013,112 @@ export interface AddStudentDocumentBody {
 
 export interface LinkStudentAccountBody {
   userId: string;
+}
+
+// ─── Account: profile / password ────────────────────────────────────────────
+
+export interface UpdateProfileBody {
+  firstName?: string;
+  lastName?: string;
+}
+
+export interface ChangePasswordBody {
+  currentPassword: string;
+  newPassword: string;
+}
+
+export interface UpdateUserRoleBody {
+  role: BackendRole;
+}
+
+// ─── Account: settings (GET/PATCH /users/me/settings) ──────────────────────
+
+export interface UserSettingsDTO {
+  id: string;
+  userId: string;
+  emailNotifications: boolean;
+  inAppNotifications: boolean;
+  locale: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface UpdateSettingsBody {
+  emailNotifications?: boolean;
+  inAppNotifications?: boolean;
+  locale?: string;
+}
+
+// ─── Notifications (root /notifications) ────────────────────────────────────
+
+export type NotificationTypeDTO = "SYSTEM" | "SUPPORT" | "ANNOUNCEMENT";
+
+export interface NotificationDTO {
+  id: string;
+  userId: string;
+  title: string;
+  body: string;
+  type: NotificationTypeDTO;
+  isRead: boolean;
+  readAt: string | null;
+  createdAt: string;
+  metadata?: Record<string, unknown> | null;
+}
+
+/** `GET /notifications` returns the usual list envelope plus `unreadCount`. */
+export interface NotificationsListMeta {
+  unreadCount: number;
+}
+
+// ─── Help Center (root /help) ───────────────────────────────────────────────
+
+export interface HelpArticleSummaryDTO {
+  id: string;
+  slug: string;
+  title: string;
+  category: string;
+  updatedAt: string;
+}
+
+export interface HelpArticleDTO extends HelpArticleSummaryDTO {
+  body: string;
+  published: boolean;
+  sortOrder: number;
+  createdAt: string;
+}
+
+// ─── Support tickets (root /support) ────────────────────────────────────────
+
+export type SupportTicketStatusDTO = "OPEN" | "IN_PROGRESS" | "CLOSED";
+
+export interface SupportReplyDTO {
+  id: string;
+  userId: string;
+  message: string;
+  createdAt: string;
+  user: { id: string; firstName: string; lastName: string; role: BackendRole };
+}
+
+export interface SupportTicketDTO {
+  id: string;
+  userId: string;
+  subject: string;
+  message: string;
+  status: SupportTicketStatusDTO;
+  createdAt: string;
+  updatedAt: string;
+  replies: SupportReplyDTO[];
+}
+
+export interface CreateTicketBody {
+  subject: string;
+  message: string;
+}
+
+export interface ReplyTicketBody {
+  message: string;
+}
+
+export interface UpdateTicketStatusBody {
+  status: SupportTicketStatusDTO;
 }

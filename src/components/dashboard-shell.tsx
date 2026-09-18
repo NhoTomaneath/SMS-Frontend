@@ -3,9 +3,10 @@
 import Link from "next/link";
 import type { ComponentType } from "react";
 import { KitLogo } from "@/components/kit-logo";
+import { NotificationBell } from "@/components/notification-bell";
 import { useAuth } from "@/lib/auth/auth-context";
 import {
-  BellIcon,
+  ClipboardIcon,
   GearIcon,
   HelpCircleIcon,
   LogOutIcon,
@@ -64,14 +65,21 @@ export function DashboardShell({
 
         <div className="mt-auto flex flex-col gap-1.5 border-t border-rose-100 pt-5">
           <Link
-            href="#"
+            href="/account/help"
             className="flex items-center gap-3 rounded-xl px-3.5 py-2.5 text-sm font-semibold text-rose-700 hover:bg-rose-100/70"
           >
             <HelpCircleIcon className="h-5 w-5" />
+            Help Center
+          </Link>
+          <Link
+            href="/account/support"
+            className="flex items-center gap-3 rounded-xl px-3.5 py-2.5 text-sm font-semibold text-rose-700 hover:bg-rose-100/70"
+          >
+            <ClipboardIcon className="h-5 w-5" />
             Support
           </Link>
           <Link
-            href="#"
+            href="/account/settings"
             className="flex items-center gap-3 rounded-xl px-3.5 py-2.5 text-sm font-semibold text-rose-700 hover:bg-rose-100/70"
           >
             <GearIcon className="h-5 w-5" />
@@ -101,13 +109,7 @@ export function DashboardShell({
             />
           </div>
           <div className="ml-auto flex items-center gap-5">
-            <button
-              type="button"
-              aria-label="Notifications"
-              className="text-stone-500 hover:text-stone-700"
-            >
-              <BellIcon className="h-5 w-5" />
-            </button>
+            <NotificationBell />
             <div className="h-8 w-px bg-stone-200" />
             <div className="text-right leading-tight">
               <p className="text-sm font-bold text-stone-800">

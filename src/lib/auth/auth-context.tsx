@@ -24,6 +24,8 @@ interface AuthContextValue {
   status: AuthStatus;
   login: (email: string, password: string) => Promise<MeDTO>;
   logout: () => Promise<void>;
+  /** Re-fetch /users/me (e.g. after a profile edit) and refresh the cached identity. */
+  refreshUser: () => Promise<MeDTO>;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -82,6 +84,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return me.data;
   }, []);
 
+  const refreshUser = useCallback(async () => {
+    const me = await apiFetch<MeDTO>("/users/me");
+    setUser(me.data);
+    return me.data;
+  }, []);
+
   const logout = useCallback(async () => {
     try {
       await apiFetch("/auth/logout", { method: "POST", skipRefresh: true });
@@ -93,8 +101,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [clearSession, router]);
 
   const value = useMemo<AuthContextValue>(
-    () => ({ user, status, login, logout }),
-    [user, status, login, logout],
+    () => ({ user, status, login, logout, refreshUser }),
+    [user, status, login, logout, refreshUser],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

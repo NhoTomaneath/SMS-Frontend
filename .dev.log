@@ -1,0 +1,13 @@
+
+> sms-frontend@0.1.0 dev C:\Users\ASUS Zenbook\Documents\KIT\S6 Internal Project\SMS\SMS-Frontend
+> next dev
+
+▲ Next.js 16.3.1 (Turbopack)
+- Local:         http://localhost:3000
+- Network:       http://192.168.45.1:3000
+- Environments: .env.local
+✓ Ready in 1408ms
+✓ Running next.config.ts took 108ms
+
+ GET /sign-in 200 in 724ms (next.js: 368ms, application-code: 356ms)
+ ELIFECYCLE  Command failed with exit code 4294967295.

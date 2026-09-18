@@ -20,6 +20,7 @@ const PORTAL_PREFIXES = [
   "/academic-affairs",
   "/student-affairs",
   "/controller-of-examination",
+  "/account",
 ];
 
 export function proxy(request: NextRequest) {
@@ -48,5 +49,6 @@ export const config = {
     "/academic-affairs/:path*",
     "/student-affairs/:path*",
     "/controller-of-examination/:path*",
+    "/account/:path*",
   ],
 };
