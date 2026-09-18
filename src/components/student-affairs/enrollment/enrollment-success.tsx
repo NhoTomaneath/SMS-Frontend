@@ -2,9 +2,11 @@
 
 import Link from "next/link";
 import { CheckCircleIcon } from "@/components/icons";
+import { BulkDocumentUpload } from "./bulk-document-upload";
 
 interface EnrollmentSuccessProps {
   assignedId: string;
+  studentId: string;
   studentName: string;
   departmentName?: string;
   academicYearLabel?: string;
@@ -13,6 +15,7 @@ interface EnrollmentSuccessProps {
 
 export function EnrollmentSuccess({
   assignedId,
+  studentId,
   studentName,
   departmentName,
   academicYearLabel,
@@ -41,6 +44,10 @@ export function EnrollmentSuccess({
         <p className="text-xs text-stone-500">
           {departmentName || "Faculty Assigned"} • {academicYearLabel || "Session"}
         </p>
+      </div>
+
+      <div className="mb-5">
+        <BulkDocumentUpload studentId={studentId} />
       </div>
 
       <div className="flex flex-wrap justify-center gap-3">

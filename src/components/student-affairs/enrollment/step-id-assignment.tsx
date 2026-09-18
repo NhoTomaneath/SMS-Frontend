@@ -45,15 +45,15 @@ export function StepIdAssignment({
       <div className="rounded-xl border border-rose-200 bg-rose-50/50 p-4">
         <TextField
           id="studentNumber"
-          label="Assigned Student Number"
+          label="Student Number (optional override)"
           value={formData.studentNumber}
           onChange={(v) => setFormData((prev) => ({ ...prev, studentNumber: v }))}
-          required
-          placeholder={`e.g. STU-${new Date().getFullYear()}-001`}
+          placeholder={`Auto-assigned from ${deptName} on submit`}
           error={fieldErrors?.studentNumber?.[0]}
         />
         <p className="mt-1 text-[11px] text-stone-500">
-          Unique institution ID assigned for transcript, exam, and attendance registration.
+          Leave blank to auto-assign a department-matched ID (e.g.{" "}
+          <span className="font-mono">CS-{new Date().getFullYear()}-0007</span>), or enter one manually.
         </p>
       </div>
 

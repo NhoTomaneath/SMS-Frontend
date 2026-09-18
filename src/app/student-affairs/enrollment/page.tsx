@@ -18,11 +18,11 @@ export default function StudentEnrollmentPage() {
   const academicYears = useApiQuery<AcademicYearDTO[]>(["academic-years"], "/student-affairs/academic-years").data?.data ?? [];
 
   const {
-    currentStep, setCurrentStep, assignedId, formError, setFormError, fieldErrors,
+    currentStep, setCurrentStep, assignedId, createdStudentId, formError, setFormError, fieldErrors,
     portraitPreview, setPortraitPreview, portraitError, setPortraitError,
     formData, setFormData, effectiveDeptId, effectiveYearId, isSubmitting,
     nextToStep2, nextToStep3, submit, reset,
-  } = useEnrollment(departments, academicYears);
+  } = useEnrollment();
 
   const activeDeptName = departments.find((d) => d.id === effectiveDeptId)?.name;
   const activeYearLabel = academicYears.find((y) => y.id === effectiveYearId)?.yearLabel;
@@ -37,8 +37,8 @@ export default function StudentEnrollmentPage() {
       />
       <StepTracker currentStep={currentStep} assignedId={assignedId} onSelectStep={(s) => { setFormError(null); setCurrentStep(s); }} />
       {formError && <p className="mb-6 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-medium text-rose-700">{formError}</p>}
-      {assignedId ? (
-        <EnrollmentSuccess assignedId={assignedId} studentName={`${formData.firstName} ${formData.lastName}`} departmentName={activeDeptName} academicYearLabel={activeYearLabel} onReset={reset} />
+      {assignedId && createdStudentId ? (
+        <EnrollmentSuccess assignedId={assignedId} studentId={createdStudentId} studentName={`${formData.firstName} ${formData.lastName}`} departmentName={activeDeptName} academicYearLabel={activeYearLabel} onReset={reset} />
       ) : (
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-[1fr_300px]">
           <div>

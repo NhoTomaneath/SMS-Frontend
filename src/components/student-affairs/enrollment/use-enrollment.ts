@@ -7,10 +7,11 @@ import type { CreateStudentBody, StudentDTO } from "@/lib/api/types";
 import { INITIAL_ENROLLMENT_DATA, type EnrollmentFormData } from "./types";
 import { isValidCambodiaPhone, isValidEmail, isValidGpa, isValidGradYear, validateDateOfBirth } from "./validation";
 
-export function useEnrollment(departments: { id: string }[], academicYears: { id: string; yearLabel: string }[]) {
+export function useEnrollment() {
   const queryClient = useQueryClient();
   const [currentStep, setCurrentStep] = useState<1 | 2 | 3>(1);
   const [assignedId, setAssignedId] = useState<string | null>(null);
+  const [createdStudentId, setCreatedStudentId] = useState<string | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string[]>>({});
   const [portraitPreview, setPortraitPreview] = useState<string | null>(null);
@@ -21,6 +22,7 @@ export function useEnrollment(departments: { id: string }[], academicYears: { id
     mutationFn: (body: CreateStudentBody) => apiFetch<StudentDTO>("/student-affairs/students", { method: "POST", body }),
     onSuccess: async (res) => {
       setAssignedId(res.data.studentNumber);
+      setCreatedStudentId(res.data.id);
       setFormError(null);
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["student-affairs", "students"] }),
@@ -61,18 +63,14 @@ export function useEnrollment(departments: { id: string }[], academicYears: { id
     if (formData.graduationYear.trim() && !isValidGradYear(formData.graduationYear)) return setFormError("Please enter a valid graduation year.");
 
     setFormError(null);
-    if (!formData.studentNumber) {
-      const year = academicYears.find((y) => y.id === formData.academicYearId)?.yearLabel.slice(0, 4) || String(new Date().getFullYear());
-      setFormData((p) => ({ ...p, studentNumber: `STU-${year}-${Math.floor(1000 + Math.random() * 9000)}` }));
-    }
     setCurrentStep(3);
   };
 
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!formData.studentNumber.trim()) return setFormError("Student ID number is required.");
     createMutation.mutate({
-      studentNumber: formData.studentNumber.trim(), firstName: formData.firstName.trim(),
+      // Omit to let the backend auto-assign a department-matched ID (DEPT-YEAR-SEQ).
+      studentNumber: formData.studentNumber.trim() || undefined, firstName: formData.firstName.trim(),
       lastName: formData.lastName.trim(), dateOfBirth: formData.dob || undefined, gender: formData.gender,
       personalEmail: formData.email.trim() || undefined, contactDetails: formData.mobile.trim() || undefined,
       bloodGroup: formData.bloodGroup || undefined, guardianName: formData.guardianName.trim() || undefined,
@@ -81,10 +79,10 @@ export function useEnrollment(departments: { id: string }[], academicYears: { id
     });
   };
 
-  const reset = () => { setAssignedId(null); setCurrentStep(1); setFormData(INITIAL_ENROLLMENT_DATA); };
+  const reset = () => { setAssignedId(null); setCreatedStudentId(null); setCurrentStep(1); setFormData(INITIAL_ENROLLMENT_DATA); };
 
   return {
-    currentStep, setCurrentStep, assignedId, formError, setFormError, fieldErrors,
+    currentStep, setCurrentStep, assignedId, createdStudentId, formError, setFormError, fieldErrors,
     portraitPreview, setPortraitPreview, portraitError, setPortraitError,
     formData, setFormData, effectiveDeptId: formData.departmentId, effectiveYearId: formData.academicYearId,
     isSubmitting: createMutation.isPending, nextToStep2, nextToStep3, submit, reset,

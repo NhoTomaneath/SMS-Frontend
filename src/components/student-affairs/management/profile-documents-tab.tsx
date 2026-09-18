@@ -1,7 +1,9 @@
 "use client";
 
 import { useState } from "react";
-import { ChevronDownIcon, DownloadIcon, FileTextIcon, PlusIcon, UploadCloudIcon, XIcon } from "@/components/icons";
+import { ChevronDownIcon, DownloadIcon, FileTextIcon, XIcon } from "@/components/icons";
+import { FileDropzone } from "@/components/file-upload";
+import { DOCUMENT_UPLOAD_TYPES, IMAGE_UPLOAD_TYPES } from "@/lib/api/upload";
 import type { DocumentType, StudentDocumentDTO } from "@/lib/api/types";
 
 interface DocsTabProps {
@@ -18,40 +20,29 @@ export function ProfileDocumentsTab({
   documents, isLoading, onAddDoc, onDeleteDoc, isAdding, isDeleting, feedback,
 }: DocsTabProps) {
   const [docType, setDocType] = useState<DocumentType>("TRANSCRIPT");
-  const [fileUrl, setFileUrl] = useState("");
-
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!fileUrl.trim()) return;
-    onAddDoc(docType, fileUrl.trim());
-    setFileUrl("");
-  };
 
   return (
     <div className="space-y-4">
       {feedback && <p className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-700">{feedback}</p>}
-      <form onSubmit={handleSubmit} className="rounded-xl border border-dashed border-stone-200 p-3 bg-stone-50/40 text-xs">
-        <h4 className="font-bold uppercase tracking-wider text-stone-600 mb-2 flex items-center gap-1.5">
-          <UploadCloudIcon className="h-4 w-4 text-rose-700" /> Attach Document
-        </h4>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-          <div className="relative">
-            <select value={docType} onChange={(e) => setDocType(e.target.value as DocumentType)} className="w-full appearance-none rounded-lg border bg-white px-3 py-1.5 outline-none">
-              <option value="TRANSCRIPT">Academic Transcript</option>
-              <option value="CERTIFICATE">Graduation Certificate</option>
-              <option value="ID_CARD">National ID / Passport</option>
-              <option value="OTHER">Other Verification Document</option>
-            </select>
-            <ChevronDownIcon className="pointer-events-none absolute right-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-stone-400" />
-          </div>
-          <input type="url" required value={fileUrl} onChange={(e) => setFileUrl(e.target.value)} placeholder="https://example.com/docs/file.pdf" className="rounded-lg border bg-white px-3 py-1.5 outline-none" />
+      <div className="rounded-xl border border-dashed border-stone-200 p-3 bg-stone-50/40 text-xs">
+        <h4 className="font-bold uppercase tracking-wider text-stone-600 mb-2">Attach Document</h4>
+        <div className="relative mb-2">
+          <select value={docType} onChange={(e) => setDocType(e.target.value as DocumentType)} className="w-full appearance-none rounded-lg border bg-white px-3 py-1.5 outline-none">
+            <option value="TRANSCRIPT">Academic Transcript</option>
+            <option value="CERTIFICATE">Graduation Certificate</option>
+            <option value="ID_CARD">National ID / Passport</option>
+            <option value="OTHER">Other Verification Document</option>
+          </select>
+          <ChevronDownIcon className="pointer-events-none absolute right-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-stone-400" />
         </div>
-        <div className="mt-2 flex justify-end">
-          <button type="submit" disabled={isAdding} className="flex items-center gap-1 rounded-lg bg-rose-800 px-3 py-1 text-xs font-semibold text-white hover:bg-rose-900 disabled:opacity-50">
-            <PlusIcon className="h-3 w-3" /> {isAdding ? "Attaching…" : "Add"}
-          </button>
-        </div>
-      </form>
+        <FileDropzone
+          compact
+          accept={[...DOCUMENT_UPLOAD_TYPES, ...IMAGE_UPLOAD_TYPES]}
+          acceptLabel="PDF, image, or spreadsheet, up to 5 MB"
+          disabled={isAdding}
+          onUploaded={(uploaded) => onAddDoc(docType, uploaded.url)}
+        />
+      </div>
 
       <div className="space-y-2">
         {isLoading && <p className="py-3 text-center text-xs text-stone-400">Loading documents…</p>}
