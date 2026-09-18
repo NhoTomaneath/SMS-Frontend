@@ -72,6 +72,9 @@ export default function ManageUserAccountsPage() {
   const [form, setForm] = useState<NewUserForm>(emptyForm);
   const [formError, setFormError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [roleEditUser, setRoleEditUser] = useState<AppUser | null>(null);
+  const [roleEditValue, setRoleEditValue] = useState<BackendRole | null>(null);
+  const [roleEditError, setRoleEditError] = useState<string | null>(null);
 
   const query = useApiQuery<AccountDTO[]>(
     [...ACCOUNTS_KEY, { page, roleFilter, statusFilter }],
@@ -130,6 +133,18 @@ export default function ManageUserAccountsPage() {
       setActionError(
         err instanceof ApiRequestError ? err.message : "Update failed.",
       );
+    },
+  });
+
+  const roleMutation = useMutation({
+    mutationFn: ({ id, role }: { id: string; role: BackendRole }) =>
+      apiFetch(`/users/${id}/role`, { method: "PATCH", body: { role } }),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ACCOUNTS_KEY });
+      setRoleEditUser(null);
+    },
+    onError: (err) => {
+      setRoleEditError(err instanceof ApiRequestError ? err.message : "Update failed.");
     },
   });
 
@@ -343,6 +358,17 @@ export default function ManageUserAccountsPage() {
                         <div className="invisible absolute right-0 top-full z-10 mt-1 w-40 rounded-lg border border-stone-200 bg-white py-1 opacity-0 shadow-lg transition-opacity group-hover:visible group-hover:opacity-100">
                           <button
                             type="button"
+                            onClick={() => {
+                              setRoleEditError(null);
+                              setRoleEditValue(user.roleValue);
+                              setRoleEditUser(user);
+                            }}
+                            className="block w-full px-4 py-2 text-left text-sm text-stone-700 hover:bg-stone-50"
+                          >
+                            Change role
+                          </button>
+                          <button
+                            type="button"
                             disabled={statusMutation.isPending}
                             onClick={() =>
                               statusMutation.mutate({
@@ -500,6 +526,62 @@ export default function ManageUserAccountsPage() {
                 className="rounded-lg bg-rose-800 px-5 py-2.5 text-sm font-semibold text-white hover:bg-rose-900 disabled:opacity-60"
               >
                 {createMutation.isPending ? "Creating…" : "Create User"}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {roleEditUser && roleEditValue && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-stone-900/50 p-4 backdrop-blur-sm">
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              setRoleEditError(null);
+              roleMutation.mutate({ id: roleEditUser.id, role: roleEditValue });
+            }}
+            className="w-full max-w-sm rounded-2xl bg-white p-6 shadow-2xl ring-1 ring-stone-900/5"
+          >
+            <h3 className="text-lg font-bold text-stone-900">Change role</h3>
+            <p className="mt-1 text-sm text-stone-500">
+              {roleEditUser.name} · {roleEditUser.email}
+            </p>
+
+            <label className="mt-5 block space-y-1.5">
+              <span className="text-sm font-medium text-stone-700">Role</span>
+              <select
+                value={roleEditValue}
+                onChange={(e) => setRoleEditValue(e.target.value as BackendRole)}
+                className={fieldClass}
+              >
+                {ROLE_OPTIONS.map((r) => (
+                  <option key={r.value} value={r.value}>
+                    {r.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            {roleEditError && (
+              <p className="mt-3 text-sm text-rose-700" role="alert">
+                {roleEditError}
+              </p>
+            )}
+
+            <div className="mt-6 flex items-center justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => setRoleEditUser(null)}
+                className="rounded-lg px-4 py-2.5 text-sm font-semibold text-stone-600 hover:bg-stone-100"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={roleMutation.isPending}
+                className="rounded-lg bg-rose-800 px-5 py-2.5 text-sm font-semibold text-white hover:bg-rose-900 disabled:opacity-60"
+              >
+                {roleMutation.isPending ? "Saving…" : "Save role"}
               </button>
             </div>
           </form>

@@ -4,18 +4,22 @@ import { useMemo, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { PageHeader } from "@/components/page-header";
 import { LoadingRow, ErrorRow, EmptyRow } from "@/components/query-states";
-import { CheckCircleIcon, PlusIcon, XIcon } from "@/components/icons";
+import { CheckCircleIcon, ChevronDownIcon, LayersIcon, PlusIcon, XIcon } from "@/components/icons";
 import { apiFetch, ApiRequestError } from "@/lib/api/client";
 import { useApiQuery } from "@/lib/api/hooks";
 import type {
   AcademicYearDetailDTO,
   DepartmentDetailDTO,
+  ProgramAcademicYearDTO,
+  ProgramDTO,
 } from "@/lib/api/types";
 import { formatDate } from "@/lib/format";
 
 const AAO_KEY = ["academic-affairs"] as const;
 const DEPARTMENTS_KEY = [...AAO_KEY, "departments"] as const;
 const YEARS_KEY = [...AAO_KEY, "academic-years"] as const;
+const PROGRAMS_KEY = [...AAO_KEY, "programs"] as const;
+const LOOKUP_LIMIT = 100;
 
 function errorMessage(err: unknown, fallback: string): string {
   if (err instanceof ApiRequestError) {
@@ -49,6 +53,9 @@ export default function ProgramSetupPage() {
   const [formError, setFormError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
+  const [linkProgramId, setLinkProgramId] = useState("");
+  const [linkYearId, setLinkYearId] = useState("");
+  const [linkError, setLinkError] = useState<string | null>(null);
 
   function showToast(message: string) {
     setToast(message);
@@ -66,11 +73,28 @@ export default function ProgramSetupPage() {
     "/academic-affairs/academic-years",
   );
 
+  const programsQuery = useApiQuery<ProgramDTO[]>(
+    [...PROGRAMS_KEY, { limit: LOOKUP_LIMIT }],
+    "/academic-affairs/programs",
+    { query: { limit: LOOKUP_LIMIT } },
+  );
+
   const departments = useMemo(
     () => departmentsQuery.data?.data ?? [],
     [departmentsQuery.data],
   );
   const years = useMemo(() => yearsQuery.data?.data ?? [], [yearsQuery.data]);
+  const programs = useMemo(() => programsQuery.data?.data ?? [], [programsQuery.data]);
+
+  const programYearsQuery = useApiQuery<ProgramAcademicYearDTO[]>(
+    [...AAO_KEY, "program-years", linkProgramId],
+    linkProgramId ? `/academic-affairs/programs/${linkProgramId}/academic-years` : "",
+    { enabled: Boolean(linkProgramId) },
+  );
+  const linkedYears = useMemo(
+    () => programYearsQuery.data?.data ?? [],
+    [programYearsQuery.data],
+  );
 
   // Departments and years are embedded in nearly every other payload, so a
   // write here invalidates the whole Academic Affairs tree and the SAO lookups.
@@ -157,6 +181,39 @@ export default function ProgramSetupPage() {
     },
     onError: (err) => setActionError(errorMessage(err, "Could not delete the academic year.")),
   });
+
+  // ── Program ↔ Academic Year linking ──────────────────────────────────────
+
+  const PROGRAM_YEARS_KEY = [...AAO_KEY, "program-years", linkProgramId] as const;
+
+  const linkProgramYear = useMutation({
+    mutationFn: () =>
+      apiFetch<ProgramAcademicYearDTO>(`/academic-affairs/programs/${linkProgramId}/academic-years`, {
+        method: "POST",
+        body: { academicYearId: linkYearId },
+      }),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: PROGRAM_YEARS_KEY });
+      setLinkError(null);
+      setLinkYearId("");
+      showToast("Program assigned to academic year.");
+    },
+    onError: (err) => setLinkError(errorMessage(err, "Could not link the program to that year.")),
+  });
+
+  const unlinkProgramYear = useMutation({
+    mutationFn: (academicYearId: string) =>
+      apiFetch(`/academic-affairs/programs/${linkProgramId}/academic-years/${academicYearId}`, {
+        method: "DELETE",
+      }),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: PROGRAM_YEARS_KEY });
+      showToast("Program unassigned from academic year.");
+    },
+    onError: (err) => setLinkError(errorMessage(err, "Could not remove that assignment.")),
+  });
+
+  const availableYearsForLink = years.filter((y) => !linkedYears.some((ly) => ly.academicYearId === y.id));
 
   return (
     <div>
@@ -372,6 +429,119 @@ export default function ProgramSetupPage() {
           </div>
         </section>
       </div>
+
+      <section className="mt-6 rounded-2xl border border-stone-200 bg-white p-5">
+        <div className="mb-4 flex items-center gap-2">
+          <LayersIcon className="h-5 w-5 text-rose-700" />
+          <h2 className="text-lg font-bold text-stone-900">Assign Program to Academic Year</h2>
+        </div>
+        <p className="mb-4 text-sm text-stone-500">
+          Link a program to the academic year(s) it runs in — this is what &quot;Academic Program
+          Setup&quot; assigns before majors and semesters can be scheduled under it.
+        </p>
+
+        <div className="flex flex-wrap items-end gap-3">
+          <div className="min-w-[220px] flex-1">
+            <label className="mb-1.5 block text-xs font-bold uppercase tracking-wide text-stone-500">
+              Program
+            </label>
+            <div className="relative">
+              <select
+                value={linkProgramId}
+                onChange={(e) => {
+                  setLinkProgramId(e.target.value);
+                  setLinkYearId("");
+                  setLinkError(null);
+                }}
+                disabled={programsQuery.isLoading}
+                className="w-full appearance-none rounded-lg border border-stone-200 bg-white px-4 py-2.5 text-sm outline-none focus:border-rose-400 disabled:bg-stone-50"
+              >
+                <option value="">
+                  {programsQuery.isLoading ? "Loading…" : "Select a program"}
+                </option>
+                {programs.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name} · {p.department.name}
+                  </option>
+                ))}
+              </select>
+              <ChevronDownIcon className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-stone-400" />
+            </div>
+          </div>
+
+          <div className="min-w-[180px] flex-1">
+            <label className="mb-1.5 block text-xs font-bold uppercase tracking-wide text-stone-500">
+              Academic Year
+            </label>
+            <div className="relative">
+              <select
+                value={linkYearId}
+                onChange={(e) => setLinkYearId(e.target.value)}
+                disabled={!linkProgramId || availableYearsForLink.length === 0}
+                className="w-full appearance-none rounded-lg border border-stone-200 bg-white px-4 py-2.5 text-sm outline-none focus:border-rose-400 disabled:bg-stone-50"
+              >
+                <option value="">
+                  {!linkProgramId
+                    ? "Select a program first"
+                    : availableYearsForLink.length === 0
+                      ? "Already linked to all years"
+                      : "Select a year"}
+                </option>
+                {availableYearsForLink.map((y) => (
+                  <option key={y.id} value={y.id}>
+                    {y.yearLabel}
+                  </option>
+                ))}
+              </select>
+              <ChevronDownIcon className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-stone-400" />
+            </div>
+          </div>
+
+          <button
+            type="button"
+            disabled={!linkProgramId || !linkYearId || linkProgramYear.isPending}
+            onClick={() => linkProgramYear.mutate()}
+            className="rounded-lg bg-rose-800 px-5 py-2.5 text-sm font-semibold text-white hover:bg-rose-900 disabled:opacity-60"
+          >
+            {linkProgramYear.isPending ? "Linking…" : "Link"}
+          </button>
+        </div>
+
+        {linkError && <p className="mt-3 text-sm font-medium text-rose-600">{linkError}</p>}
+
+        {linkProgramId && (
+          <div className="mt-4">
+            <p className="mb-2 text-xs font-bold uppercase tracking-wide text-stone-500">
+              Currently linked
+            </p>
+            {programYearsQuery.isLoading ? (
+              <p className="text-sm text-stone-400">Loading…</p>
+            ) : linkedYears.length === 0 ? (
+              <p className="text-sm text-stone-400">Not linked to any academic year yet.</p>
+            ) : (
+              <ul className="flex flex-wrap gap-2">
+                {linkedYears.map((link) => (
+                  <li
+                    key={link.id}
+                    className="flex items-center gap-2 rounded-full bg-rose-50 px-3 py-1.5 text-sm font-semibold text-rose-700"
+                  >
+                    {link.academicYear.yearLabel}
+                    <button
+                      type="button"
+                      disabled={unlinkProgramYear.isPending}
+                      onClick={() => unlinkProgramYear.mutate(link.academicYearId)}
+                      aria-label={`Unlink ${link.academicYear.yearLabel}`}
+                      className="text-rose-400 hover:text-rose-700 disabled:opacity-50"
+                    >
+                      <XIcon className="h-3.5 w-3.5" />
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        )}
+      </section>
 
       <p className="mt-6 rounded-2xl border border-stone-200 bg-white p-5 text-sm text-stone-500">
         Deleting is blocked while anything still references the row — the counts
