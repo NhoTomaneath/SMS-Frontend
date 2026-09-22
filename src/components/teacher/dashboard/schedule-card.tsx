@@ -8,9 +8,10 @@ import type { TimetableScheduleItem } from "../types";
 interface ScheduleCardProps {
   item: TimetableScheduleItem;
   onTakeAttendance: (item: TimetableScheduleItem) => void;
+  canTakeAttendance: boolean;
 }
 
-export function ScheduleCard({ item, onTakeAttendance }: ScheduleCardProps) {
+export function ScheduleCard({ item, onTakeAttendance, canTakeAttendance }: ScheduleCardProps) {
   const registeredCount = item.class._count?.registrations ?? 0;
   const courseTitle = `${item.class.course.code}: ${item.class.course.name}`;
 
@@ -40,8 +41,10 @@ export function ScheduleCard({ item, onTakeAttendance }: ScheduleCardProps) {
         <StatusBadge label={item.class.status || "ACTIVE"} tone="rose" />
         <button
           type="button"
+          disabled={!canTakeAttendance}
+          title={canTakeAttendance ? undefined : "Attendance can only be recorded for today's date."}
           onClick={() => onTakeAttendance(item)}
-          className="rounded-lg bg-rose-800 px-4 py-2 text-sm font-semibold text-white hover:bg-rose-900"
+          className="rounded-lg bg-rose-800 px-4 py-2 text-sm font-semibold text-white hover:bg-rose-900 disabled:cursor-not-allowed disabled:opacity-50"
         >
           Take Attendance
         </button>

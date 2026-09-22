@@ -26,6 +26,12 @@ export default function TeacherDashboard() {
   const classes = classesQuery.data?.data ?? [];
   const schedule = scheduleQuery.data?.data ?? [];
 
+  const today = new Date();
+  const isToday =
+    selectedDate.getFullYear() === today.getFullYear() &&
+    selectedDate.getMonth() === today.getMonth() &&
+    selectedDate.getDate() === today.getDate();
+
   function triggerToast(msg: string) {
     setToast(msg);
     window.setTimeout(() => setToast(null), 4000);
@@ -38,6 +44,7 @@ export default function TeacherDashboard() {
       <TodayScheduleSection
         schedule={schedule}
         isLoading={scheduleQuery.isLoading}
+        isToday={isToday}
         onOpenTimetable={() => setShowTimetable(true)}
         onTakeAttendance={(item) => setAttendanceFor(item)}
       />
