@@ -33,19 +33,20 @@ export function SubmissionsTable({
               <th className="px-6 py-3">Student Number</th>
               <th className="px-6 py-3">Name</th>
               <th className="px-6 py-3">Status</th>
+              <th className="px-6 py-3">Submitted work</th>
               <th className="px-6 py-3">Score / {assignment.maxScore}</th>
             </tr>
           </thead>
           <tbody>
             {isLoading ? (
               <tr>
-                <td colSpan={4} className="px-6 py-10 text-center text-sm text-stone-400">
+                <td colSpan={5} className="px-6 py-10 text-center text-sm text-stone-400">
                   Loading submissions…
                 </td>
               </tr>
             ) : submissions.length === 0 ? (
               <tr>
-                <td colSpan={4} className="px-6 py-10 text-center text-sm text-stone-400">
+                <td colSpan={5} className="px-6 py-10 text-center text-sm text-stone-400">
                   No submissions recorded for this assignment yet.
                 </td>
               </tr>

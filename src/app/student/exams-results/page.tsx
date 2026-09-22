@@ -13,6 +13,8 @@ import type {
   OwnResultDTO,
 } from "@/lib/api/types";
 import {
+  YEAR_LABEL,
+  countdownLabel,
   examTone,
   fromApiOwnExam,
   fromApiOwnResult,
@@ -52,9 +54,8 @@ export default function StudentExamsResultsPage() {
   const distribution = useMemo(() => gradeDistributionOf(results), [results]);
 
   const published = results.filter((r) => r.status === "PUBLISHED");
-  const upcoming = exams.filter(
-    (e) => e.status === "SCHEDULED" || e.status === "PUBLISHED",
-  );
+  // "Upcoming" is by date: a published exam whose day has passed is history.
+  const upcoming = exams.filter((e) => e.daysAway >= 0 && e.status !== "COMPLETED");
 
   return (
     <div>
@@ -153,6 +154,15 @@ export default function StudentExamsResultsPage() {
                         <td className="px-6 py-4">
                           <p className="text-stone-700">{exam.date}</p>
                           <p className="text-xs text-stone-400">{exam.time}</p>
+                          {exam.daysAway >= 0 && exam.status !== "COMPLETED" && (
+                            <p
+                              className={`mt-0.5 text-xs font-semibold ${
+                                exam.daysAway <= 3 ? "text-rose-700" : "text-amber-700"
+                              }`}
+                            >
+                              {countdownLabel(exam.daysAway)}
+                            </p>
+                          )}
                         </td>
                         <td className="px-6 py-4 text-stone-600">{exam.rooms}</td>
                         <td className="px-6 py-4">
@@ -295,7 +305,7 @@ export default function StudentExamsResultsPage() {
                 </div>
                 <div className="flex justify-between">
                   <dt className="text-stone-500">Year level</dt>
-                  <dd className="text-stone-700">{standing.yearLevel}</dd>
+                  <dd className="text-stone-700">{YEAR_LABEL[standing.yearLevel] ?? standing.yearLevel}</dd>
                 </div>
               </dl>
             ) : (

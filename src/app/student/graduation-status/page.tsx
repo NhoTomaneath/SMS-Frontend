@@ -17,7 +17,7 @@ import type {
   OwnGraduationStatusDTO,
   TranscriptDTO,
 } from "@/lib/api/types";
-import { graduationTone, transcriptTone } from "@/lib/student/dashboard-data";
+import { YEAR_LABEL, graduationTone, transcriptTone } from "@/lib/student/dashboard-data";
 import { formatDate, percentOf, titleCase } from "@/lib/format";
 
 const STUDENT_KEY = ["student"] as const;
@@ -234,7 +234,10 @@ export default function StudentGraduationStatusPage() {
                 },
                 { label: "Completed", value: String(standing?.completedCourses ?? 0) },
                 { label: "Semesters", value: String(standing?.semesterCount ?? 0) },
-                { label: "Year level", value: standing?.yearLevel ?? "—" },
+                {
+                  label: "Year level",
+                  value: standing ? (YEAR_LABEL[standing.yearLevel] ?? standing.yearLevel) : "—",
+                },
               ].map((s) => (
                 <div key={s.label} className="rounded-xl bg-stone-50 p-4">
                   <dt className="text-xs font-bold uppercase tracking-wide text-stone-500">

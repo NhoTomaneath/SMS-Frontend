@@ -49,6 +49,26 @@ export function SubmissionRow({ submission, maxScore, onSaveGrade }: SubmissionR
           tone={submission.score !== null ? "green" : "amber"}
         />
       </td>
+      <td className="px-6 py-4 text-xs">
+        {submission.fileUrl ? (
+          <a
+            href={submission.fileUrl}
+            target="_blank"
+            rel="noreferrer"
+            className="font-semibold text-rose-700 hover:underline"
+          >
+            Open file
+          </a>
+        ) : (
+          <span className="text-stone-400">No file</span>
+        )}
+        {submission.isLate && <span className="ml-2 font-semibold text-amber-700">Late</span>}
+        {submission.note && (
+          <p className="mt-0.5 max-w-[14rem] truncate text-stone-500" title={submission.note}>
+            “{submission.note}”
+          </p>
+        )}
+      </td>
       <td className="px-6 py-4">
         <div className="flex items-center gap-2">
           <input

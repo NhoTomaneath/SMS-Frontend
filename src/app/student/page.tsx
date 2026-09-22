@@ -5,6 +5,9 @@ import { useMemo } from "react";
 import { IconStatCard } from "@/components/icon-stat-card";
 import { PageHeader } from "@/components/page-header";
 import { StatusBadge } from "@/components/status-badge";
+import { CourseworkRow } from "@/components/student/coursework-row";
+import { UpcomingExamsAlert } from "@/components/student/upcoming-exams-alert";
+import { WeeklyTimetable } from "@/components/student/weekly-timetable";
 import {
   BarChartIcon,
   CalendarIcon,
@@ -14,9 +17,7 @@ import {
 import { useApiQuery } from "@/lib/api/hooks";
 import type { StudentDashboardDTO } from "@/lib/api/types";
 import {
-  WEEK_DAYS,
-  courseworkLabel,
-  courseworkTone,
+  YEAR_LABEL,
   fromApiOwnAssignment,
   fromApiOwnTimetable,
   todayName,
@@ -24,13 +25,6 @@ import {
 import { percentOf } from "@/lib/format";
 
 const STUDENT_KEY = ["student"] as const;
-
-const YEAR_LABEL: Record<string, string> = {
-  FR: "Freshman",
-  SO: "Sophomore",
-  JR: "Junior",
-  SR: "Senior",
-};
 
 export default function StudentDashboard() {
   const dashboardQuery = useApiQuery<StudentDashboardDTO>(
@@ -87,6 +81,8 @@ export default function StudentDashboard() {
         description="Your timetable, attendance, and coursework at a glance."
       />
 
+      <UpcomingExamsAlert exams={data?.upcomingExams ?? []} />
+
       <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <IconStatCard
           icon={ClipboardIcon}
@@ -137,7 +133,7 @@ export default function StudentDashboard() {
           <section className="rounded-2xl border border-stone-200 bg-white p-6">
             <h2 className="text-xl font-bold text-stone-900">Weekly Timetable</h2>
             <p className="text-sm text-stone-500">
-              Published classes for the courses you are registered in.
+              Your classes this semester, at their real times.
             </p>
 
             {dashboardQuery.isLoading ? (
@@ -147,48 +143,7 @@ export default function StudentDashboard() {
                 No published timetable entries yet.
               </p>
             ) : (
-              <div className="mt-5 space-y-5">
-                {WEEK_DAYS.map((day) => {
-                  const daySlots = slots
-                    .filter((s) => s.day === day)
-                    .sort((a, b) => a.startTime.localeCompare(b.startTime));
-                  if (daySlots.length === 0) return null;
-                  return (
-                    <div key={day}>
-                      <p
-                        className={`text-xs font-bold uppercase tracking-wide ${
-                          day === today ? "text-rose-700" : "text-stone-400"
-                        }`}
-                      >
-                        {day}
-                        {day === today && " · Today"}
-                      </p>
-                      <ul className="mt-2 space-y-2">
-                        {daySlots.map((slot) => (
-                          <li
-                            key={slot.id}
-                            className={`flex flex-wrap items-center justify-between gap-3 rounded-xl border-l-4 p-3 ${
-                              day === today
-                                ? "border-rose-600 bg-rose-50"
-                                : "border-stone-200 bg-stone-50"
-                            }`}
-                          >
-                            <div className="min-w-0">
-                              <p className="font-bold text-stone-800">{slot.code}</p>
-                              <p className="truncate text-xs text-stone-500">
-                                {slot.name}
-                              </p>
-                            </div>
-                            <p className="text-xs font-semibold text-stone-600">
-                              {slot.startTime}–{slot.endTime} · {slot.room}
-                            </p>
-                          </li>
-                        ))}
-                      </ul>
-                    </div>
-                  );
-                })}
-              </div>
+              <WeeklyTimetable slots={slots} />
             )}
           </section>
 
@@ -197,7 +152,7 @@ export default function StudentDashboard() {
               <h2 className="text-xl font-bold text-stone-900">
                 Assigned Coursework
               </h2>
-              <StatusBadge label={`${coursework.length} items`} tone="rose" />
+              <StatusBadge label={`${coursework.length} shown`} tone="rose" />
             </div>
             {dashboardQuery.isLoading ? (
               <p className="p-6 text-sm text-stone-400">Loading…</p>
@@ -208,40 +163,16 @@ export default function StudentDashboard() {
             ) : (
               <ul className="divide-y divide-stone-100">
                 {coursework.map((item) => (
-                  <li
-                    key={item.id}
-                    className="flex flex-wrap items-center justify-between gap-3 p-5"
-                  >
-                    <div className="min-w-0">
-                      <p className="font-semibold text-stone-800">{item.title}</p>
-                      <p className="truncate text-xs text-stone-500">
-                        {item.courseLabel}
-                      </p>
-                    </div>
-                    <div className="flex items-center gap-4">
-                      <div className="text-right">
-                        <p className="text-xs text-stone-500">Due {item.dueLabel}</p>
-                        <p className="text-xs font-semibold text-stone-700">
-                          {item.score === null
-                            ? `${item.maxScore} marks`
-                            : `${item.score}/${item.maxScore}`}
-                        </p>
-                      </div>
-                      <StatusBadge
-                        label={courseworkLabel[item.status]}
-                        tone={courseworkTone[item.status]}
-                      />
-                    </div>
-                  </li>
+                  <CourseworkRow key={item.id} item={item} />
                 ))}
               </ul>
             )}
             <div className="border-t border-stone-200 p-4 text-center">
               <Link
-                href="/student/exams-results"
+                href="/student/assignments"
                 className="text-sm font-semibold text-rose-700 hover:underline"
               >
-                View exams &amp; results
+                View all assignments
               </Link>
             </div>
           </section>
@@ -331,6 +262,12 @@ export default function StudentDashboard() {
               Quick Links
             </h3>
             <div className="mt-4 flex flex-col gap-2">
+              <Link
+                href="/student/assignments"
+                className="rounded-lg border border-stone-200 px-4 py-2.5 text-sm font-semibold text-stone-700 hover:bg-stone-50"
+              >
+                Assignments
+              </Link>
               <Link
                 href="/student/exams-results"
                 className="rounded-lg border border-stone-200 px-4 py-2.5 text-sm font-semibold text-stone-700 hover:bg-stone-50"

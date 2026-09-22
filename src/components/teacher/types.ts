@@ -69,6 +69,10 @@ export interface SubmissionItem {
   id: string;
   assignmentId: string;
   studentId: string;
+  /** The student's uploaded work; null when the submission was recorded by hand. */
+  fileUrl?: string | null;
+  note?: string | null;
+  isLate?: boolean;
   score: number | null;
   submittedAt: string;
   gradedAt: string | null;

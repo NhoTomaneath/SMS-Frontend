@@ -2,12 +2,16 @@
 
 import { usePathname } from "next/navigation";
 import { DashboardShell } from "@/components/dashboard-shell";
-import { BarChartIcon, GraduationCapIcon, GridIcon } from "@/components/icons";
+import { BarChartIcon, ClipboardIcon, GraduationCapIcon, GridIcon } from "@/components/icons";
 import { useAuth } from "@/lib/auth/auth-context";
 import { roleLabel } from "@/lib/auth/roles";
 
 function isDashboardActive(pathname: string) {
   return pathname === "/student";
+}
+
+function isAssignmentsActive(pathname: string) {
+  return pathname.startsWith("/student/assignments");
 }
 
 function isExamsActive(pathname: string) {
@@ -28,6 +32,12 @@ export function StudentShell({ children }: { children: React.ReactNode }) {
       label: "Dashboard",
       icon: GridIcon,
       active: isDashboardActive(pathname),
+    },
+    {
+      href: "/student/assignments",
+      label: "Assignments",
+      icon: ClipboardIcon,
+      active: isAssignmentsActive(pathname),
     },
     {
       href: "/student/exams-results",

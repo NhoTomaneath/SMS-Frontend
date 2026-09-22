@@ -839,13 +839,26 @@ export interface OwnAssignmentDTO {
   maxScore: number;
   dueDate: string;
   class: { id: string; course: { id: string; code: string; name: string } };
-  submission: {
-    id: string;
-    score: number | null;
-    submittedAt: string;
-    gradedAt: string | null;
-  } | null;
+  submission: OwnAssignmentSubmissionDTO | null;
   status: OwnAssignmentStatusDTO;
+}
+
+export interface OwnAssignmentSubmissionDTO {
+  id: string;
+  score: number | null;
+  /** The uploaded work. Null when a teacher recorded the submission by hand. */
+  fileUrl: string | null;
+  note: string | null;
+  /** True when the work arrived after the due date. */
+  isLate: boolean;
+  submittedAt: string;
+  gradedAt: string | null;
+}
+
+/** `POST /student/me/assignments/:id/submission`. */
+export interface SubmitAssignmentBody {
+  fileUrl: string;
+  note?: string;
 }
 
 /** `GET /student/me/dashboard`. */
@@ -856,6 +869,8 @@ export interface StudentDashboardDTO {
   assignments: OwnAssignmentDTO[];
   academicStanding: OwnAcademicStandingDTO;
   timetable: OwnTimetableEntryDTO[];
+  /** Scheduled or published exams still to come, soonest first (at most five). */
+  upcomingExams: OwnExamDTO[];
 }
 
 // ─── Principal ──────────────────────────────────────────────────────────────
@@ -1051,7 +1066,14 @@ export interface UpdateSettingsBody {
 
 // ─── Notifications (root /notifications) ────────────────────────────────────
 
-export type NotificationTypeDTO = "SYSTEM" | "SUPPORT" | "ANNOUNCEMENT";
+export type NotificationTypeDTO =
+  | "SYSTEM"
+  | "SUPPORT"
+  | "ANNOUNCEMENT"
+  | "ASSIGNMENT"
+  | "GRADE"
+  | "ATTENDANCE"
+  | "EXAM";
 
 export interface NotificationDTO {
   id: string;

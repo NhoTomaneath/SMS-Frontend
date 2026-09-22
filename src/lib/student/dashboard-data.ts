@@ -8,6 +8,7 @@ import type {
   GraduationRecordStatusDTO,
   OwnAssignmentDTO,
   OwnAssignmentStatusDTO,
+  OwnAssignmentSubmissionDTO,
   OwnExamDTO,
   OwnResultDTO,
   OwnTimetableEntryDTO,
@@ -47,6 +48,28 @@ export function fromApiOwnTimetable(dto: OwnTimetableEntryDTO): OwnClassSlot {
   };
 }
 
+/** "08:00" → 8, "13:30" → 13.5. */
+export function hoursOf(clock: string): number {
+  const [h = "0", m = "0"] = clock.split(":");
+  return Number(h) + Number(m) / 60;
+}
+
+/** Same course, same tint — on every day of the week grid. Full class names so Tailwind keeps them. */
+const COURSE_TINTS = [
+  "border-rose-500 bg-rose-50 text-rose-900",
+  "border-sky-500 bg-sky-50 text-sky-900",
+  "border-emerald-500 bg-emerald-50 text-emerald-900",
+  "border-amber-500 bg-amber-50 text-amber-900",
+  "border-violet-500 bg-violet-50 text-violet-900",
+  "border-teal-500 bg-teal-50 text-teal-900",
+];
+
+export function courseTint(code: string): string {
+  let hash = 0;
+  for (let i = 0; i < code.length; i += 1) hash = (hash * 31 + code.charCodeAt(i)) | 0;
+  return COURSE_TINTS[Math.abs(hash) % COURSE_TINTS.length] as string;
+}
+
 /** Maps a JS weekday index onto the backend enum. */
 export function todayName(date = new Date()): DayOfWeekDTO {
   const names: DayOfWeekDTO[] = [
@@ -61,27 +84,41 @@ export function todayName(date = new Date()): DayOfWeekDTO {
   return names[date.getDay()] as DayOfWeekDTO;
 }
 
+/** What the backend's FR/SO/JR/SR year codes are called on screen, everywhere. */
+export const YEAR_LABEL: Record<string, string> = {
+  FR: "Freshman",
+  SO: "Sophomore",
+  JR: "Junior",
+  SR: "Senior",
+};
+
 // ─── Coursework ─────────────────────────────────────────────────────────────
 
 export interface CourseworkItem {
   id: string;
   title: string;
+  description: string | null;
   courseLabel: string;
   dueLabel: string;
+  dueIso: string;
   maxScore: number;
   score: number | null;
   status: OwnAssignmentStatusDTO;
+  submission: OwnAssignmentSubmissionDTO | null;
 }
 
 export function fromApiOwnAssignment(dto: OwnAssignmentDTO): CourseworkItem {
   return {
     id: dto.id,
     title: dto.title,
+    description: dto.description,
     courseLabel: `${dto.class.course.code} — ${dto.class.course.name}`,
     dueLabel: formatDate(dto.dueDate),
+    dueIso: dto.dueDate,
     maxScore: dto.maxScore,
     score: dto.submission?.score ?? null,
     status: dto.status,
+    submission: dto.submission,
   };
 }
 
@@ -111,6 +148,8 @@ export interface OwnExamRow {
   subject: string;
   examType: string;
   date: string;
+  /** Whole days from today to the exam (0 = today, negative = already held). */
+  daysAway: number;
   time: string;
   rooms: string;
   status: ExamStatusDTO;
@@ -120,6 +159,24 @@ export interface OwnExamRow {
   mySubmission: { fileUrl: string; submittedAt: string } | null;
   /** The real submission deadline (exam date + end time), for an open/closed check. */
   submissionDeadline: Date;
+}
+
+/**
+ * Calendar days from today to an exam date. Compares plain dates (year, month,
+ * day) so the viewer's timezone and the exam's time of day cannot shift it.
+ */
+export function daysUntil(iso: string, now = new Date()): number {
+  const target = new Date(iso);
+  const t = Date.UTC(target.getUTCFullYear(), target.getUTCMonth(), target.getUTCDate());
+  const today = Date.UTC(now.getFullYear(), now.getMonth(), now.getDate());
+  return Math.round((t - today) / 86400000);
+}
+
+export function countdownLabel(daysAway: number): string {
+  if (daysAway < 0) return "Held";
+  if (daysAway === 0) return "Today";
+  if (daysAway === 1) return "Tomorrow";
+  return `In ${daysAway} days`;
 }
 
 export function fromApiOwnExam(dto: OwnExamDTO): OwnExamRow {
@@ -133,6 +190,7 @@ export function fromApiOwnExam(dto: OwnExamDTO): OwnExamRow {
     subject: dto.class.course.name,
     examType: dto.examType === "MIDTERM" ? "Midterm" : "Final",
     date: formatDate(dto.examDate),
+    daysAway: daysUntil(dto.examDate),
     time: timeRange(dto.startTime, dto.endTime),
     rooms:
       dto.roomAssignments.map((r) => r.examRoom.name).join(", ") || "Room TBC",
