@@ -7,12 +7,14 @@ interface DraftPapersSectionProps {
   papers: ExamPaperItem[];
   isLoading: boolean;
   onSubmitToCoe: (id: string) => Promise<void>;
+  onEdit: (paper: ExamPaperItem) => void;
 }
 
 export function DraftPapersSection({
   papers,
   isLoading,
   onSubmitToCoe,
+  onEdit,
 }: DraftPapersSectionProps) {
   const pendingCount = papers.filter((p) => p.status !== "RECEIVED").length;
 
@@ -27,12 +29,12 @@ export function DraftPapersSection({
         <p className="py-6 text-center text-sm text-stone-400">Loading exam papers…</p>
       ) : papers.length === 0 ? (
         <p className="py-6 text-center text-sm text-stone-400">
-          No exam papers created for this exam yet. Submit a paper URL above!
+          No exam paper submitted for this exam yet. Use Submit Paper above.
         </p>
       ) : (
         <ul className="divide-y divide-stone-100">
           {papers.map((paper) => (
-            <ExamPaperRow key={paper.id} paper={paper} onSubmitToCoe={onSubmitToCoe} />
+            <ExamPaperRow key={paper.id} paper={paper} onSubmitToCoe={onSubmitToCoe} onEdit={onEdit} />
           ))}
         </ul>
       )}

@@ -18,6 +18,7 @@ export interface ExamPaperItem {
   examId: string;
   teacherId: string;
   fileUrl: string;
+  answerKeyUrl: string | null;
   status: "DRAFT" | "SUBMITTED" | "RECEIVED";
   submittedAt: string | null;
   receivedAt: string | null;

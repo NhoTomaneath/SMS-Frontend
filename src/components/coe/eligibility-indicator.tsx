@@ -24,7 +24,7 @@ export function EligibilityIndicator({ studentId }: { studentId: string }) {
   const eligibility = query.data.data;
 
   return (
-    <span title={eligibility.reasons.join(" ")}>
+    <span className="whitespace-nowrap" title={eligibility.reasons.join(" ")}>
       <StatusBadge
         label={
           eligibility.eligible

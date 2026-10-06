@@ -432,8 +432,8 @@ export default function TranscriptGraduationPage() {
           </div>
         </section>
       ) : (
-        <div className="grid grid-cols-1 gap-6 lg:grid-cols-[1fr_320px]">
-          <section className="rounded-2xl border border-stone-200 bg-white">
+        <div className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1fr)_320px]">
+          <section className="min-w-0 rounded-2xl border border-stone-200 bg-white">
             <div className="flex flex-wrap items-center justify-between gap-3 border-b border-stone-200 p-5">
               <div>
                 <h2 className="text-xl font-bold text-stone-900">Graduation Records</h2>
@@ -461,14 +461,14 @@ export default function TranscriptGraduationPage() {
             </div>
 
             <div className="overflow-x-auto">
-              <table className="w-full text-left text-sm">
+              <table className="w-full min-w-[820px] whitespace-nowrap text-left text-sm">
                 <thead>
                   <tr className="text-xs font-bold uppercase tracking-wide text-stone-400">
-                    <th className="px-5 py-3">Student</th>
-                    <th className="px-5 py-3">Graduation Date</th>
-                    <th className="px-5 py-3">Status</th>
-                    <th className="px-5 py-3">Computed Eligibility</th>
-                    <th className="px-5 py-3 text-right">Set Status</th>
+                    <th className="px-4 py-3">Student</th>
+                    <th className="px-4 py-3">Graduation Date</th>
+                    <th className="px-4 py-3">Status</th>
+                    <th className="px-4 py-3">Computed Eligibility</th>
+                    <th className="px-4 py-3 text-right">Set Status</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-stone-100">
@@ -484,7 +484,7 @@ export default function TranscriptGraduationPage() {
                     !recordsQuery.isError &&
                     records.map((r) => (
                       <tr key={r.id}>
-                        <td className="px-5 py-3">
+                        <td className="px-4 py-3.5">
                           <div className="flex items-center gap-2.5">
                             <span
                               className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-xs font-bold ${avatarColor(r.studentId)}`}
@@ -501,19 +501,19 @@ export default function TranscriptGraduationPage() {
                             </div>
                           </div>
                         </td>
-                        <td className="px-5 py-3 text-stone-600">
+                        <td className="px-4 py-3.5 text-stone-600">
                           {formatDate(r.graduationDate, "—")}
                         </td>
-                        <td className="px-5 py-3">
+                        <td className="px-4 py-3.5">
                           <StatusBadge
                             label={titleCase(r.status)}
                             tone={graduationTone[r.status]}
                           />
                         </td>
-                        <td className="px-5 py-3">
+                        <td className="px-4 py-3.5">
                           <EligibilityIndicator studentId={r.studentId} />
                         </td>
-                        <td className="px-5 py-3">
+                        <td className="px-4 py-3.5">
                           <div className="flex items-center justify-end gap-1.5">
                             {GRADUATION_STATUS_OPTIONS.map((o) => (
                               <button
@@ -523,7 +523,7 @@ export default function TranscriptGraduationPage() {
                                 onClick={() =>
                                   updateRecord.mutate({ id: r.id, status: o.value })
                                 }
-                                className={`rounded-md border px-2 py-1 text-xs font-semibold disabled:opacity-40 ${
+                                className={`rounded-md border px-2.5 py-1 text-xs font-semibold whitespace-nowrap disabled:opacity-40 ${
                                   r.status === o.value
                                     ? "border-rose-700 bg-rose-700 text-white"
                                     : "border-stone-200 text-stone-500 hover:bg-stone-50"

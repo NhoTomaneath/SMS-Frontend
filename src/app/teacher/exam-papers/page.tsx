@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import type { ExamPaperItem } from "@/components/teacher/exam-types";
 import { CheckCircleIcon } from "@/components/icons";
 import { useTeacherClasses } from "@/components/teacher/hooks/use-teacher-workspace";
 import {
@@ -14,7 +15,6 @@ import { ExamScoreEntrySection } from "@/components/teacher/exam-papers/exam-sco
 import { CorrectionHubSection } from "@/components/teacher/exam-papers/correction-hub-section";
 import { ExamPerformanceAside } from "@/components/teacher/exam-papers/exam-performance-aside";
 import { CreateExamPaperModal } from "@/components/teacher/exam-papers/create-exam-paper-modal";
-import { BulkUploadModal } from "@/components/teacher/exam-papers/bulk-upload-modal";
 
 export default function TeacherExamPaperPage() {
   const classesQuery = useTeacherClasses();
@@ -22,7 +22,7 @@ export default function TeacherExamPaperPage() {
 
   const [selectedClassId, setSelectedClassId] = useState("");
   const [showCreateModal, setShowCreateModal] = useState(false);
-  const [showUploadModal, setShowUploadModal] = useState(false);
+  const [editingPaper, setEditingPaper] = useState<ExamPaperItem | null>(null);
   const [toast, setToast] = useState<string | null>(null);
 
   const activeClassId = selectedClassId || classes[0]?.id || "";
@@ -37,6 +37,14 @@ export default function TeacherExamPaperPage() {
   const papers = useMemo(() => papersQuery.data?.data ?? [], [papersQuery.data]);
   const submitMutation = useSubmitExamPaper(activeExam?.id);
 
+  const submitBlockedReason = examsQuery.isLoading
+    ? "Loading exams…"
+    : !activeExam
+      ? "The Controller of Examination has not created an exam for this class yet."
+      : papers.length > 0
+        ? "A paper is already submitted for this exam. Use Edit to change it."
+        : null;
+
   function triggerToast(msg: string) {
     setToast(msg);
     window.setTimeout(() => setToast(null), 4000);
@@ -49,14 +57,21 @@ export default function TeacherExamPaperPage() {
         selectedClassId={activeClassId}
         onSelectClass={setSelectedClassId}
         onOpenCreate={() => setShowCreateModal(true)}
-        onOpenBulkUpload={() => setShowUploadModal(true)}
+        submitBlockedReason={submitBlockedReason}
       />
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-[1fr_320px]">
         <div className="space-y-6">
+          {!examsQuery.isLoading && !activeExam && activeClassId && (
+            <p className="rounded-lg bg-amber-50 px-4 py-3 text-sm text-amber-800">
+              The Controller of Examination has not created an exam for this class yet. You can
+              submit the exam paper and answer key once an exam is scheduled.
+            </p>
+          )}
           <DraftPapersSection
             papers={papers}
             isLoading={papersQuery.isLoading}
+            onEdit={setEditingPaper}
             onSubmitToCoe={async (id) => {
               await submitMutation.mutateAsync({ id });
               triggerToast("Exam paper submitted to COE for review.");
@@ -69,17 +84,14 @@ export default function TeacherExamPaperPage() {
         <ExamPerformanceAside />
       </div>
 
-      {showCreateModal && activeExam && (
+      {(showCreateModal || editingPaper) && activeExam && (
         <CreateExamPaperModal
           examId={activeExam.id}
-          onClose={() => setShowCreateModal(false)}
-          onSuccess={triggerToast}
-        />
-      )}
-
-      {showUploadModal && (
-        <BulkUploadModal
-          onClose={() => setShowUploadModal(false)}
+          paper={editingPaper}
+          onClose={() => {
+            setShowCreateModal(false);
+            setEditingPaper(null);
+          }}
           onSuccess={triggerToast}
         />
       )}

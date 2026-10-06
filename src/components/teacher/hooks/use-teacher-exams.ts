@@ -27,13 +27,23 @@ export function useExamPapers(examId?: string) {
 }
 
 export function useCreateExamPaper(examId: string) {
-  return useApiMutation<{ fileUrl: string }, ExamPaperItem>(
+  return useApiMutation<{ fileUrl: string; answerKeyUrl: string }, ExamPaperItem>(
     `/teacher/exams/${examId}/exam-papers`,
     {
       method: "POST",
       invalidate: [["teacher", "exam-papers", examId]],
     },
   );
+}
+
+export function useUpdateExamPaper(examId?: string) {
+  return useApiMutation<
+    { id: string; fileUrl?: string; answerKeyUrl?: string },
+    ExamPaperItem
+  >((body) => `/teacher/exam-papers/${body.id}`, {
+    method: "PATCH",
+    invalidate: examId ? [["teacher", "exam-papers", examId]] : undefined,
+  });
 }
 
 export function useSubmitExamPaper(examId?: string) {

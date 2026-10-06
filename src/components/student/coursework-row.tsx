@@ -4,8 +4,7 @@ import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { StatusBadge } from "@/components/status-badge";
 import { CheckCircleIcon, UploadCloudIcon, XIcon } from "@/components/icons";
-import { FileDropzone, UploadedFileRow } from "@/components/file-upload";
-import { DOCUMENT_UPLOAD_TYPES, IMAGE_UPLOAD_TYPES } from "@/lib/api/upload";
+import { validateDocumentLink } from "@/lib/validate-link";
 import { apiFetch, ApiRequestError } from "@/lib/api/client";
 import type { OwnAssignmentSubmissionDTO, SubmitAssignmentBody } from "@/lib/api/types";
 import {
@@ -15,8 +14,6 @@ import {
 } from "@/lib/student/dashboard-data";
 import { formatDateTime } from "@/lib/format";
 
-const ACCEPT = [...DOCUMENT_UPLOAD_TYPES, ...IMAGE_UPLOAD_TYPES];
-
 /**
  * One assignment, with the place to hand it in. Late work is still accepted —
  * it is flagged so the teacher can decide — until the teacher has graded it.
@@ -24,7 +21,7 @@ const ACCEPT = [...DOCUMENT_UPLOAD_TYPES, ...IMAGE_UPLOAD_TYPES];
 export function CourseworkRow({ item }: { item: CourseworkItem }) {
   const queryClient = useQueryClient();
   const [open, setOpen] = useState(false);
-  const [pendingFile, setPendingFile] = useState<{ name: string; url: string; size: number | null } | null>(null);
+  const [link, setLink] = useState("");
   const [note, setNote] = useState("");
   const [error, setError] = useState<string | null>(null);
 
@@ -41,7 +38,7 @@ export function CourseworkRow({ item }: { item: CourseworkItem }) {
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ["student"] });
       setOpen(false);
-      setPendingFile(null);
+      setLink("");
       setNote("");
       setError(null);
     },
@@ -73,7 +70,7 @@ export function CourseworkRow({ item }: { item: CourseworkItem }) {
                 rel="noreferrer"
                 className="font-semibold text-rose-700 hover:underline"
               >
-                View file
+                View link
               </a>
             )}
           </p>
@@ -134,24 +131,22 @@ export function CourseworkRow({ item }: { item: CourseworkItem }) {
               </p>
             )}
 
-            <div className="mt-5">
-              {pendingFile ? (
-                <UploadedFileRow
-                  name={pendingFile.name}
-                  url={pendingFile.url}
-                  size={pendingFile.size}
-                  onRemove={() => setPendingFile(null)}
-                />
-              ) : (
-                <FileDropzone
-                  accept={ACCEPT}
-                  acceptLabel="PDF, document, image or spreadsheet, up to 5 MB"
-                  onUploaded={(file, original) =>
-                    setPendingFile({ name: original.name, url: file.url, size: file.size })
-                  }
-                />
-              )}
-            </div>
+            <label className="mt-5 block text-xs font-bold uppercase tracking-wide text-stone-500">
+              Assignment link
+              <input
+                type="url"
+                value={link}
+                onChange={(e) => {
+                  setLink(e.target.value);
+                  setError(null);
+                }}
+                placeholder="https://drive.google.com/..."
+                className="mt-1.5 w-full rounded-lg border border-stone-300 px-3 py-2 text-sm font-normal normal-case tracking-normal text-stone-800 outline-none focus:border-rose-500"
+              />
+              <span className="mt-1 block text-xs font-normal normal-case tracking-normal text-stone-400">
+                Make sure the link is shared so your teacher can open it.
+              </span>
+            </label>
 
             <label className="mt-4 block text-xs font-bold uppercase tracking-wide text-stone-500">
               Note to teacher (optional)
@@ -176,14 +171,18 @@ export function CourseworkRow({ item }: { item: CourseworkItem }) {
               </button>
               <button
                 type="button"
-                disabled={!pendingFile || submitMutation.isPending}
-                onClick={() =>
-                  pendingFile &&
+                disabled={submitMutation.isPending}
+                onClick={() => {
+                  const problem = validateDocumentLink(link);
+                  if (problem) {
+                    setError(problem);
+                    return;
+                  }
                   submitMutation.mutate({
-                    fileUrl: pendingFile.url,
+                    fileUrl: link.trim(),
                     ...(note.trim() ? { note: note.trim() } : {}),
-                  })
-                }
+                  });
+                }}
                 className="rounded-lg bg-rose-800 px-5 py-2.5 text-sm font-semibold text-white hover:bg-rose-900 disabled:opacity-60"
               >
                 {submitMutation.isPending ? "Submitting…" : "Submit"}

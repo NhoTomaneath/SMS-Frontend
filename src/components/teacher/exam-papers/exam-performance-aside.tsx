@@ -14,22 +14,6 @@ const initialChecklist = [
 export function ExamPerformanceAside() {
   const [checklist, setChecklist] = useState(initialChecklist);
 
-  function downloadGuidelines() {
-    const text =
-      "COE Submission Guidelines\n\n" +
-      "1. Map every question to its ABET criteria before submission.\n" +
-      "2. Upload the answer key draft to the secure cloud folder.\n" +
-      "3. Verify internal coursework marks for all enrolled students.\n" +
-      "4. Obtain COE portal approval before conducting exams.\n";
-    const blob = new Blob([text], { type: "text/plain;charset=utf-8;" });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = "coe-submission-guidelines.txt";
-    link.click();
-    URL.revokeObjectURL(url);
-  }
-
   return (
     <aside className="space-y-6">
       <div className="rounded-2xl border border-rose-100 bg-rose-50/50 p-6">
@@ -59,13 +43,6 @@ export function ExamPerformanceAside() {
             </li>
           ))}
         </ul>
-        <button
-          type="button"
-          onClick={downloadGuidelines}
-          className="mt-5 w-full rounded-lg border border-rose-300 bg-white py-2.5 text-sm font-semibold text-rose-800 hover:bg-rose-50"
-        >
-          Download Guidelines
-        </button>
       </div>
 
       <PromoBanner

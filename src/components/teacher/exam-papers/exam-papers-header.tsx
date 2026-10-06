@@ -1,6 +1,6 @@
 "use client";
 
-import { EditIcon, UploadCloudIcon } from "@/components/icons";
+import { EditIcon } from "@/components/icons";
 import { PageHeader } from "@/components/page-header";
 import type { TeacherClass } from "../types";
 
@@ -9,7 +9,8 @@ interface ExamPapersHeaderProps {
   selectedClassId: string;
   onSelectClass: (id: string) => void;
   onOpenCreate: () => void;
-  onOpenBulkUpload: () => void;
+  /** Why submitting is unavailable right now; the button is disabled when set. */
+  submitBlockedReason?: string | null;
 }
 
 export function ExamPapersHeader({
@@ -17,7 +18,7 @@ export function ExamPapersHeader({
   selectedClassId,
   onSelectClass,
   onOpenCreate,
-  onOpenBulkUpload,
+  submitBlockedReason,
 }: ExamPapersHeaderProps) {
   return (
     <PageHeader
@@ -49,22 +50,13 @@ export function ExamPapersHeader({
 
           <button
             type="button"
-            disabled={classes.length === 0}
-            onClick={onOpenBulkUpload}
-            className="flex items-center gap-2 rounded-lg border border-stone-300 px-4 py-2 text-sm font-semibold text-stone-600 hover:bg-stone-50 disabled:opacity-50"
-          >
-            <UploadCloudIcon className="h-4 w-4" />
-            Bulk Upload
-          </button>
-
-          <button
-            type="button"
-            disabled={classes.length === 0}
+            disabled={classes.length === 0 || Boolean(submitBlockedReason)}
+            title={submitBlockedReason ?? undefined}
             onClick={onOpenCreate}
             className="flex items-center gap-2 rounded-lg bg-rose-800 px-4 py-2 text-sm font-semibold text-white hover:bg-rose-900 disabled:opacity-50"
           >
             <EditIcon className="h-4 w-4" />
-            Submit Paper URL
+            Submit Paper
           </button>
         </div>
       }
