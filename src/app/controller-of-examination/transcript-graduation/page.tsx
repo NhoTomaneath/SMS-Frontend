@@ -21,7 +21,6 @@ import type {
   GraduationRecordDTO,
   GraduationRecordStatusDTO,
   GraduationReportDTO,
-  StudentDTO,
   TranscriptDTO,
   TranscriptStatusDTO,
 } from "@/lib/api/types";
@@ -56,8 +55,8 @@ export default function TranscriptGraduationPage() {
   const [statusFilter, setStatusFilter] = useState<"ALL" | TranscriptStatusDTO>("ALL");
   const [pickedReportId, setPickedReportId] = useState("");
 
-  const [showRequest, setShowRequest] = useState(false);
-  const [requestStudentId, setRequestStudentId] = useState("");
+  const [showPicker, setShowPicker] = useState(false);
+  const [pickedRequestId, setPickedRequestId] = useState("");
   const [showNewReport, setShowNewReport] = useState(false);
   const [newReportYearId, setNewReportYearId] = useState("");
 
@@ -105,12 +104,12 @@ export default function TranscriptGraduationPage() {
     "/student-affairs/academic-years",
   );
 
-  // The COE cannot read /student-affairs/students, so the transcript request
-  // picker is seeded from students who already have a graduation record.
-  const studentsQuery = useApiQuery<StudentDTO[]>(
-    [...COE_KEY, "students"],
-    "/student-affairs/students",
-    { query: { limit: 100 }, retry: false },
+  // Transcripts are requested by students; the COE only generates them, so the
+  // picker lists just the requests still waiting.
+  const pendingQuery = useApiQuery<TranscriptDTO[]>(
+    [...TRANSCRIPTS_KEY, "pending"],
+    "/coe/transcripts",
+    { query: { status: "REQUESTED", limit: 100 } },
   );
 
   const reports = useMemo(() => reportsQuery.data?.data ?? [], [reportsQuery.data]);
@@ -131,7 +130,7 @@ export default function TranscriptGraduationPage() {
   );
   const records = useMemo(() => recordsQuery.data?.data ?? [], [recordsQuery.data]);
   const years = useMemo(() => yearsQuery.data?.data ?? [], [yearsQuery.data]);
-  const students = studentsQuery.data?.data ?? [];
+  const pendingRequests = pendingQuery.data?.data ?? [];
 
   const total = transcriptsQuery.data?.pagination?.total ?? 0;
   const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE));
@@ -139,22 +138,6 @@ export default function TranscriptGraduationPage() {
   const yearId = newReportYearId || years[0]?.id || "";
 
   // ── Mutations ─────────────────────────────────────────────────────────────
-
-  const requestTranscript = useMutation({
-    mutationFn: () =>
-      apiFetch<TranscriptDTO>("/coe/transcripts", {
-        method: "POST",
-        body: { studentId: requestStudentId },
-      }),
-    onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: TRANSCRIPTS_KEY });
-      setShowRequest(false);
-      setRequestStudentId("");
-      setFormError(null);
-      showToast("Transcript requested.");
-    },
-    onError: (err) => setFormError(errorMessage(err, "Could not request the transcript.")),
-  });
 
   const generateTranscript = useMutation({
     mutationFn: ({ id, fileUrl }: { id: string; fileUrl?: string }) =>
@@ -243,14 +226,14 @@ export default function TranscriptGraduationPage() {
             <button
               type="button"
               onClick={() => {
-                setRequestStudentId("");
+                setPickedRequestId("");
                 setFormError(null);
-                setShowRequest(true);
+                setShowPicker(true);
               }}
               className="flex items-center gap-2 rounded-lg bg-rose-800 px-5 py-2.5 text-sm font-semibold text-white hover:bg-rose-900"
             >
               <PlusIcon className="h-4 w-4" />
-              Request Transcript
+              Generate Transcript
             </button>
           ) : (
             <button
@@ -622,25 +605,33 @@ export default function TranscriptGraduationPage() {
         </div>
       )}
 
-      {showRequest && (
+      {showPicker && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
           <form
             noValidate
             onSubmit={(e) => {
               e.preventDefault();
-              if (!requestStudentId) {
-                setFormError("Select a student.");
+              const request = pendingRequests.find((r) => r.id === pickedRequestId);
+              if (!request) {
+                setFormError("Select a student with a pending request.");
                 return;
               }
-              requestTranscript.mutate();
+              setShowPicker(false);
+              setFormError(null);
+              setGenerateFor(request);
             }}
             className="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl"
           >
             <div className="flex items-start justify-between">
-              <h3 className="text-lg font-bold text-stone-900">Request Transcript</h3>
+              <div>
+                <h3 className="text-lg font-bold text-stone-900">Generate Transcript</h3>
+                <p className="mt-1 text-sm text-stone-500">
+                  Only students who have requested a transcript are listed.
+                </p>
+              </div>
               <button
                 type="button"
-                onClick={() => setShowRequest(false)}
+                onClick={() => setShowPicker(false)}
                 aria-label="Close"
                 className="text-stone-400 hover:text-stone-600"
               >
@@ -649,41 +640,34 @@ export default function TranscriptGraduationPage() {
             </div>
 
             <label
-              htmlFor="t-student"
+              htmlFor="t-request"
               className="mt-5 mb-1.5 block text-xs font-bold uppercase tracking-wide text-stone-500"
             >
               Student
             </label>
-            {studentsQuery.isError ? (
-              <input
-                id="t-student"
-                required
-                placeholder="Student UUID"
-                value={requestStudentId}
-                onChange={(e) => setRequestStudentId(e.target.value)}
-                className="w-full rounded-lg border border-stone-200 px-4 py-2.5 font-mono text-xs outline-none focus:border-rose-400"
-              />
-            ) : (
-              <select
-                id="t-student"
-                value={requestStudentId}
-                onChange={(e) => setRequestStudentId(e.target.value)}
-                disabled={studentsQuery.isLoading}
-                className="w-full rounded-lg border border-stone-200 bg-white px-4 py-2.5 text-sm outline-none focus:border-rose-400 disabled:bg-stone-50"
-              >
-                <option value="">Select student…</option>
-                {students.map((s) => (
-                  <option key={s.id} value={s.id}>
-                    {s.studentNumber} — {fullName(s.firstName, s.lastName)}
-                  </option>
-                ))}
-              </select>
-            )}
-            {studentsQuery.isError && (
-              <p className="mt-1.5 text-xs text-stone-500">
-                The student directory is Student Affairs–only, so paste the record
-                id here.
-              </p>
+            <select
+              id="t-request"
+              value={pickedRequestId}
+              onChange={(e) => setPickedRequestId(e.target.value)}
+              disabled={pendingQuery.isLoading || pendingRequests.length === 0}
+              className="w-full rounded-lg border border-stone-200 bg-white px-4 py-2.5 text-sm outline-none focus:border-rose-400 disabled:bg-stone-50"
+            >
+              <option value="">
+                {pendingQuery.isLoading
+                  ? "Loading requests…"
+                  : pendingRequests.length === 0
+                    ? "No pending requests"
+                    : "Select student…"}
+              </option>
+              {pendingRequests.map((r) => (
+                <option key={r.id} value={r.id}>
+                  {r.student.studentNumber} — {fullName(r.student.firstName, r.student.lastName)} ·
+                  requested {formatDate(r.requestedAt)}
+                </option>
+              ))}
+            </select>
+            {pendingQuery.isError && (
+              <p className="mt-1.5 text-xs text-rose-600">{pendingQuery.error.message}</p>
             )}
 
             {formError && (
@@ -693,17 +677,17 @@ export default function TranscriptGraduationPage() {
             <div className="mt-6 flex items-center justify-end gap-4">
               <button
                 type="button"
-                onClick={() => setShowRequest(false)}
+                onClick={() => setShowPicker(false)}
                 className="text-sm font-semibold text-stone-500 hover:text-stone-700"
               >
                 Cancel
               </button>
               <button
                 type="submit"
-                disabled={requestTranscript.isPending}
+                disabled={pendingRequests.length === 0}
                 className="rounded-lg bg-rose-800 px-5 py-2.5 text-sm font-semibold text-white hover:bg-rose-900 disabled:opacity-60"
               >
-                {requestTranscript.isPending ? "Requesting…" : "Request"}
+                Continue
               </button>
             </div>
           </form>
