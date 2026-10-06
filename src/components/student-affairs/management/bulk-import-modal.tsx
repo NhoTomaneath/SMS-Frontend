@@ -1,7 +1,7 @@
 "use client";
 
 import { useRef, useState } from "react";
-import { DownloadIcon, UploadCloudIcon, XIcon } from "@/components/icons";
+import { CheckCircleIcon, DownloadIcon, UploadCloudIcon, XIcon } from "@/components/icons";
 import { apiFetch } from "@/lib/api/client";
 import type { ImportStudentsResultDTO } from "@/lib/api/types";
 
@@ -62,15 +62,30 @@ export function BulkImportModal({ isOpen, onClose, onSuccess }: BulkImportProps)
           <button type="button" onClick={onClose} className="text-stone-400 hover:text-stone-600"><XIcon className="h-4 w-4" /></button>
         </div>
         {error && <p className="mt-3 text-xs text-rose-600 font-semibold">{error}</p>}
-        <div className="mt-4 rounded-xl border-2 border-dashed p-6 text-center">
-          <input ref={fileRef} type="file" accept=".csv,.xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv" className="hidden" onChange={(e) => { setFile(e.target.files?.[0] || null); setError(null); }} />
-          <UploadCloudIcon className="mx-auto h-7 w-7 text-stone-400" />
-          <p className="mt-2 text-xs font-semibold text-stone-700">{file ? file.name : "Select a CSV or Excel (.xlsx) file"}</p>
-          <div className="mt-2 flex items-center justify-center gap-3">
-            <button type="button" onClick={() => fileRef.current?.click()} className="text-xs font-bold text-rose-700 hover:underline">Browse File</button>
-            <span className="text-stone-300">|</span>
-            <button type="button" onClick={downloadTemplate} className="flex items-center gap-1 text-xs text-stone-600 hover:text-stone-900"><DownloadIcon className="h-3 w-3" /> Template</button>
-          </div>
+        <div className={`mt-4 rounded-xl border-2 p-6 text-center ${file ? "border-emerald-300 bg-emerald-50" : "border-dashed"}`}>
+          <input ref={fileRef} type="file" accept=".csv,.xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv" className="hidden" onChange={(e) => { setFile(e.target.files?.[0] || null); setError(null); e.target.value = ""; }} />
+          {file ? (
+            <>
+              <CheckCircleIcon className="mx-auto h-7 w-7 text-emerald-600" />
+              <p className="mt-2 text-xs font-semibold text-emerald-800">File ready to upload</p>
+              <p className="mt-1 break-all text-xs text-stone-700">{file.name} <span className="text-stone-400">({(file.size / 1024).toFixed(1)} KB)</span></p>
+              <div className="mt-2 flex items-center justify-center gap-3">
+                <button type="button" onClick={() => fileRef.current?.click()} className="text-xs font-bold text-rose-700 hover:underline">Change file</button>
+                <span className="text-stone-300">|</span>
+                <button type="button" onClick={() => { setFile(null); setError(null); }} className="text-xs text-stone-600 hover:text-stone-900">Remove</button>
+              </div>
+            </>
+          ) : (
+            <>
+              <UploadCloudIcon className="mx-auto h-7 w-7 text-stone-400" />
+              <p className="mt-2 text-xs font-semibold text-stone-700">Select a CSV or Excel (.xlsx) file</p>
+              <div className="mt-2 flex items-center justify-center gap-3">
+                <button type="button" onClick={() => fileRef.current?.click()} className="text-xs font-bold text-rose-700 hover:underline">Browse File</button>
+                <span className="text-stone-300">|</span>
+                <button type="button" onClick={downloadTemplate} className="flex items-center gap-1 text-xs text-stone-600 hover:text-stone-900"><DownloadIcon className="h-3 w-3" /> Template</button>
+              </div>
+            </>
+          )}
         </div>
         <div className="mt-4 flex justify-end gap-2 border-t pt-3">
           <button type="button" onClick={onClose} className="rounded-lg border px-3 py-1.5 text-xs font-semibold hover:bg-stone-50">Cancel</button>
