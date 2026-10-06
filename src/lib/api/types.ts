@@ -572,6 +572,7 @@ export interface TeacherExamPaperDTO {
   examId: string;
   teacherId: string;
   fileUrl: string;
+  answerKeyUrl: string | null;
   status: ExamPaperStatusDTO;
   submittedAt: string | null;
   receivedById: string | null;

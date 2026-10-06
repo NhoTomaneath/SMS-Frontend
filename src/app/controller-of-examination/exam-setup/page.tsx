@@ -441,15 +441,33 @@ export default function ExamSetupPage() {
                         <p className="truncate text-sm font-semibold text-stone-800">
                           {fullName(paper.teacher.firstName, paper.teacher.lastName)}
                         </p>
-                        <a
-                          href={paper.fileUrl}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="flex items-center gap-1 truncate text-xs text-rose-700 hover:underline"
-                        >
-                          <FileTextIcon className="h-3 w-3 shrink-0" />
-                          {paper.fileUrl.split("/").pop()}
-                        </a>
+                        <div className="mt-1 space-y-0.5">
+                          <a
+                            href={paper.fileUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="flex items-center gap-1 text-xs text-rose-700 hover:underline"
+                          >
+                            <FileTextIcon className="h-3 w-3 shrink-0" />
+                            Exam paper ↗
+                          </a>
+                          {paper.answerKeyUrl ? (
+                            <a
+                              href={paper.answerKeyUrl}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="flex items-center gap-1 text-xs text-rose-700 hover:underline"
+                            >
+                              <FileTextIcon className="h-3 w-3 shrink-0" />
+                              Answer key ↗
+                            </a>
+                          ) : (
+                            <span className="flex items-center gap-1 text-xs text-stone-400">
+                              <FileTextIcon className="h-3 w-3 shrink-0" />
+                              No answer key
+                            </span>
+                          )}
+                        </div>
                       </div>
                       <StatusBadge
                         label={titleCase(paper.status)}

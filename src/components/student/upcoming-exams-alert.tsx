@@ -10,8 +10,7 @@ const SOON_DAYS = 3;
 const SHOWN = 3;
 
 /**
- * The dashboard's exam heads-up: what is coming, when, where, and whether the
- * paper is out yet. Renders nothing when there is nothing to prepare for.
+ * The dashboard's exam heads-up: what is coming, when, and where. Renders nothing when there is nothing to prepare for.
  */
 export function UpcomingExamsAlert({ exams }: { exams: OwnExamDTO[] }) {
   const rows = exams.map(fromApiOwnExam).filter((e) => e.daysAway >= 0);
@@ -37,7 +36,7 @@ export function UpcomingExamsAlert({ exams }: { exams: OwnExamDTO[] }) {
           href="/student/exams-results"
           className="text-sm font-semibold text-rose-700 hover:underline"
         >
-          Exam schedule &amp; papers
+          Exam schedule
         </Link>
       </div>
 
@@ -79,21 +78,6 @@ export function UpcomingExamsAlert({ exams }: { exams: OwnExamDTO[] }) {
                 <dd>{exam.rooms}</dd>
               </div>
             </dl>
-
-            <div className="mt-3 border-t border-stone-100 pt-3 text-xs">
-              {exam.examPaperUrl ? (
-                <a
-                  href={exam.examPaperUrl}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="font-semibold text-rose-700 hover:underline"
-                >
-                  Paper released — download
-                </a>
-              ) : (
-                <span className="text-stone-400">Paper not released yet</span>
-              )}
-            </div>
           </li>
         ))}
       </ul>
