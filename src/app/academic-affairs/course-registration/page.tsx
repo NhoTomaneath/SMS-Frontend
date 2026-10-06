@@ -9,6 +9,7 @@ import {
   AlertTriangleIcon,
   CheckCircleIcon,
   ChevronDownIcon,
+  DownloadIcon,
   FileTextIcon,
   PlusIcon,
   SparkleIcon,
@@ -286,6 +287,18 @@ export default function CourseRegistrationSchedulingPage() {
     },
     onError: (err) => setPublishError(errorMessage(err, "Publish failed.")),
   });
+
+  function downloadCourseTemplate() {
+    const csv = "code,name,department,credits\nCSC101,Introduction to Computing,Computer Science,3";
+    const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8;" }));
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "course_import_template.csv";
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  }
 
   function selectUploadFile(file: File | undefined | null) {
     if (!file) return;
@@ -721,6 +734,13 @@ export default function CourseRegistrationSchedulingPage() {
               >
                 <UploadCloudIcon className="h-4 w-4" />
                 Browse Files
+              </button>
+              <button
+                type="button"
+                onClick={downloadCourseTemplate}
+                className="mx-auto mt-3 flex items-center gap-1 text-xs font-semibold text-stone-600 hover:text-stone-900"
+              >
+                <DownloadIcon className="h-3 w-3" /> Download template
               </button>
 
               {uploadFile && (
