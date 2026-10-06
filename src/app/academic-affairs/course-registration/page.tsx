@@ -10,7 +10,6 @@ import {
   CheckCircleIcon,
   ChevronDownIcon,
   DownloadIcon,
-  FileTextIcon,
   PlusIcon,
   SparkleIcon,
   UploadCloudIcon,
@@ -30,6 +29,7 @@ import type {
 } from "@/lib/api/types";
 import {
   TIMETABLE_DAYS,
+  type TimetableEvent,
   TIMETABLE_TIME_SLOTS,
   fromApiConflict,
   fromApiCourse,
@@ -90,6 +90,9 @@ export default function CourseRegistrationSchedulingPage() {
   const [registerError, setRegisterError] = useState<string | null>(null);
   const [publishError, setPublishError] = useState<string | null>(null);
   const [generateNote, setGenerateNote] = useState<string | null>(null);
+  const [editEntry, setEditEntry] = useState<TimetableEvent | null>(null);
+  const [editForm, setEditForm] = useState({ day: "MONDAY", startTime: "", endTime: "", room: "" });
+  const [editError, setEditError] = useState<string | null>(null);
 
   function showToast(message: string) {
     setToast(message);
@@ -258,6 +261,64 @@ export default function CourseRegistrationSchedulingPage() {
     },
     onError: (err) => setGenerateNote(errorMessage(err, "Could not generate the timetable.")),
   });
+
+  /** Removes every entry in the selected semester so it can be regenerated. */
+  const clearMutation = useMutation({
+    mutationFn: () =>
+      apiFetch<{ deletedCount: number }>(
+        `/academic-affairs/timetables?semesterId=${encodeURIComponent(semesterId)}`,
+        { method: "DELETE" },
+      ),
+    onMutate: () => setGenerateNote(null),
+    onSuccess: async (res) => {
+      await invalidateSchedule();
+      const n = res.data.deletedCount;
+      showToast(`Cleared ${n} timetable entr${n === 1 ? "y" : "ies"}.`);
+    },
+    onError: (err) => setGenerateNote(errorMessage(err, "Could not clear the timetable.")),
+  });
+
+  const updateEntryMutation = useMutation({
+    mutationFn: (vars: { id: string; day: string; startTime: string; endTime: string; room: string }) =>
+      apiFetch(`/academic-affairs/timetables/${vars.id}`, {
+        method: "PATCH",
+        body: {
+          dayOfWeek: vars.day,
+          startTime: vars.startTime,
+          endTime: vars.endTime,
+          room: vars.room,
+        },
+      }),
+    onSuccess: async () => {
+      await invalidateSchedule();
+      setEditEntry(null);
+      showToast("Timetable entry updated.");
+    },
+    onError: (err) => setEditError(errorMessage(err, "Could not update the entry.")),
+  });
+
+  function openEditEntry(event: TimetableEvent) {
+    setEditEntry(event);
+    setEditError(null);
+    setEditForm({
+      day: event.day,
+      startTime: event.startTime,
+      endTime: event.endTime,
+      room: event.room,
+    });
+  }
+
+  function handleClearTimetable() {
+    if (!semesterId || timetableEntries.length === 0) return;
+    const label = selectedSemester?.label ?? "this semester";
+    if (
+      !window.confirm(
+        `Clear all ${timetableEntries.length} timetable entries for ${label}? This cannot be undone.`,
+      )
+    )
+      return;
+    clearMutation.mutate();
+  }
 
   /**
    * The backend publishes one timetable entry at a time, so publishing a
@@ -459,6 +520,15 @@ export default function CourseRegistrationSchedulingPage() {
                 </div>
                 <button
                   type="button"
+                  onClick={handleClearTimetable}
+                  disabled={!semesterId || timetableEntries.length === 0 || clearMutation.isPending}
+                  title="Removes every timetable entry in this semester."
+                  className="flex items-center gap-2 rounded-lg border border-rose-300 bg-white px-4 py-2.5 text-sm font-semibold text-rose-700 hover:bg-rose-50 disabled:opacity-50"
+                >
+                  {clearMutation.isPending ? "Clearing…" : "Clear"}
+                </button>
+                <button
+                  type="button"
                   onClick={() => generateMutation.mutate()}
                   disabled={!semesterId || generateMutation.isPending}
                   title="Fills empty slots for classes with no timetable yet."
@@ -514,9 +584,12 @@ export default function CourseRegistrationSchedulingPage() {
                           >
                             <div className="flex h-full flex-col gap-1">
                               {slotEvents.map((event) => (
-                                <div
+                                <button
+                                  type="button"
                                   key={event.id}
-                                  className={`min-h-0 flex-1 rounded-md border-l-4 px-2.5 py-1.5 text-xs ${event.colorClassName}`}
+                                  onClick={() => openEditEntry(event)}
+                                  title="Edit this entry"
+                                  className={`min-h-0 flex-1 rounded-md border-l-4 px-2.5 py-1.5 text-left text-xs hover:ring-2 hover:ring-stone-300 ${event.colorClassName}`}
                                 >
                                   <p className="truncate font-bold">
                                     {event.title}
@@ -529,7 +602,7 @@ export default function CourseRegistrationSchedulingPage() {
                                   <p className="mt-0.5 truncate opacity-80">
                                     {event.startTime}–{event.endTime} · {event.location}
                                   </p>
-                                </div>
+                                </button>
                               ))}
                             </div>
                           </td>
@@ -697,10 +770,12 @@ export default function CourseRegistrationSchedulingPage() {
             </div>
 
             <div
-              className={`mt-5 rounded-2xl border-2 border-dashed p-8 text-center transition-colors ${
-                isDraggingUpload
-                  ? "border-rose-400 bg-rose-100/60"
-                  : "border-rose-200 bg-rose-50/40"
+              className={`mt-5 rounded-2xl border-2 p-8 text-center transition-colors ${
+                uploadFile
+                  ? "border-emerald-300 bg-emerald-50"
+                  : isDraggingUpload
+                    ? "border-dashed border-rose-400 bg-rose-50"
+                    : "border-dashed border-rose-200 bg-rose-50/40"
               }`}
               onDragOver={(e) => {
                 e.preventDefault();
@@ -713,51 +788,67 @@ export default function CourseRegistrationSchedulingPage() {
                 selectUploadFile(e.dataTransfer.files?.[0]);
               }}
             >
-              <span className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-rose-100 text-rose-600">
-                <UploadCloudIcon className="h-7 w-7" />
-              </span>
-              <p className="mt-4 font-semibold text-stone-800">
-                Drag and drop your file here
-              </p>
-              <p className="mt-1 text-xs text-stone-500">Supports .csv files</p>
               <input
                 ref={uploadInputRef}
                 type="file"
                 accept=".csv,text/csv"
                 className="hidden"
-                onChange={(e) => selectUploadFile(e.target.files?.[0])}
+                onChange={(e) => {
+                  selectUploadFile(e.target.files?.[0]);
+                  e.target.value = "";
+                }}
               />
-              <button
-                type="button"
-                onClick={() => uploadInputRef.current?.click()}
-                className="mt-4 inline-flex items-center gap-2 rounded-lg border border-stone-300 bg-white px-4 py-2 text-sm font-semibold text-stone-700 hover:bg-stone-50"
-              >
-                <UploadCloudIcon className="h-4 w-4" />
-                Browse Files
-              </button>
-              <button
-                type="button"
-                onClick={downloadCourseTemplate}
-                className="mx-auto mt-3 flex items-center gap-1 text-xs font-semibold text-stone-600 hover:text-stone-900"
-              >
-                <DownloadIcon className="h-3 w-3" /> Download template
-              </button>
-
-              {uploadFile && (
-                <div className="mx-auto mt-4 flex max-w-xs items-center justify-between gap-2 rounded-lg border border-stone-200 bg-white px-3 py-2 text-left">
-                  <span className="flex min-w-0 items-center gap-2 text-sm text-stone-700">
-                    <FileTextIcon className="h-4 w-4 shrink-0 text-rose-600" />
-                    <span className="truncate">{uploadFile.name}</span>
+              {uploadFile ? (
+                <>
+                  <span className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-emerald-100 text-emerald-600">
+                    <CheckCircleIcon className="h-7 w-7" />
                   </span>
+                  <p className="mt-4 font-semibold text-emerald-800">File ready to upload</p>
+                  <p className="mt-1 break-all text-sm text-stone-700">
+                    {uploadFile.name}{" "}
+                    <span className="text-stone-400">({(uploadFile.size / 1024).toFixed(1)} KB)</span>
+                  </p>
+                  <div className="mt-4 flex items-center justify-center gap-3 text-sm">
+                    <button
+                      type="button"
+                      onClick={() => uploadInputRef.current?.click()}
+                      className="font-bold text-rose-700 hover:underline"
+                    >
+                      Change file
+                    </button>
+                    <span className="text-stone-300">|</span>
+                    <button
+                      type="button"
+                      onClick={() => setUploadFile(null)}
+                      className="text-stone-600 hover:text-stone-900"
+                    >
+                      Remove
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <span className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-rose-100 text-rose-600">
+                    <UploadCloudIcon className="h-7 w-7" />
+                  </span>
+                  <p className="mt-4 font-semibold text-stone-800">Drag and drop your file here</p>
+                  <p className="mt-1 text-xs text-stone-500">Supports .csv files</p>
                   <button
                     type="button"
-                    onClick={() => setUploadFile(null)}
-                    aria-label="Remove file"
-                    className="shrink-0 text-stone-400 hover:text-rose-600"
+                    onClick={() => uploadInputRef.current?.click()}
+                    className="mt-4 inline-flex items-center gap-2 rounded-lg border border-stone-300 bg-white px-4 py-2 text-sm font-semibold text-stone-700 hover:bg-stone-50"
                   >
-                    <XIcon className="h-4 w-4" />
+                    <UploadCloudIcon className="h-4 w-4" />
+                    Browse Files
                   </button>
-                </div>
+                  <button
+                    type="button"
+                    onClick={downloadCourseTemplate}
+                    className="mx-auto mt-3 flex items-center gap-1 text-xs font-semibold text-stone-600 hover:text-stone-900"
+                  >
+                    <DownloadIcon className="h-3 w-3" /> Download template
+                  </button>
+                </>
               )}
             </div>
 
@@ -789,6 +880,105 @@ export default function CourseRegistrationSchedulingPage() {
               </button>
             </div>
           </div>
+        </div>
+      )}
+
+      {editEntry && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (!editForm.startTime || !editForm.endTime) {
+                setEditError("Start and end time are required.");
+                return;
+              }
+              updateEntryMutation.mutate({ id: editEntry.id, ...editForm });
+            }}
+            className="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl"
+          >
+            <div className="flex items-start justify-between">
+              <div>
+                <h3 className="text-lg font-bold text-stone-900">Edit {editEntry.title}</h3>
+                <p className="mt-1 text-sm text-stone-500">
+                  Changes are checked against teacher and room conflicts.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setEditEntry(null)}
+                aria-label="Close"
+                className="text-stone-400 hover:text-stone-600"
+              >
+                <XIcon className="h-5 w-5" />
+              </button>
+            </div>
+
+            <div className="mt-5 space-y-4">
+              <label className="block text-sm font-semibold text-stone-700">
+                Day
+                <select
+                  value={editForm.day}
+                  onChange={(e) => setEditForm({ ...editForm, day: e.target.value })}
+                  className="mt-1 w-full rounded-lg border border-stone-300 bg-white px-3 py-2 text-sm"
+                >
+                  {TIMETABLE_DAYS.map((d) => (
+                    <option key={d} value={d}>
+                      {d.charAt(0) + d.slice(1).toLowerCase()}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <div className="grid grid-cols-2 gap-3">
+                <label className="block text-sm font-semibold text-stone-700">
+                  Start
+                  <input
+                    type="time"
+                    value={editForm.startTime}
+                    onChange={(e) => setEditForm({ ...editForm, startTime: e.target.value })}
+                    className="mt-1 w-full rounded-lg border border-stone-300 px-3 py-2 text-sm"
+                  />
+                </label>
+                <label className="block text-sm font-semibold text-stone-700">
+                  End
+                  <input
+                    type="time"
+                    value={editForm.endTime}
+                    onChange={(e) => setEditForm({ ...editForm, endTime: e.target.value })}
+                    className="mt-1 w-full rounded-lg border border-stone-300 px-3 py-2 text-sm"
+                  />
+                </label>
+              </div>
+              <label className="block text-sm font-semibold text-stone-700">
+                Room
+                <input
+                  type="text"
+                  value={editForm.room}
+                  maxLength={50}
+                  onChange={(e) => setEditForm({ ...editForm, room: e.target.value })}
+                  className="mt-1 w-full rounded-lg border border-stone-300 px-3 py-2 text-sm"
+                />
+              </label>
+            </div>
+
+            {editError && <p className="mt-3 text-sm font-medium text-rose-600">{editError}</p>}
+
+            <div className="mt-6 flex items-center justify-end gap-4">
+              <button
+                type="button"
+                onClick={() => setEditEntry(null)}
+                className="text-sm font-semibold text-stone-500 hover:text-stone-700"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={updateEntryMutation.isPending}
+                className="rounded-lg bg-rose-800 px-5 py-2.5 text-sm font-semibold text-white hover:bg-rose-900 disabled:opacity-60"
+              >
+                {updateEntryMutation.isPending ? "Saving…" : "Save changes"}
+              </button>
+            </div>
+          </form>
         </div>
       )}
 

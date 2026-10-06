@@ -127,6 +127,8 @@ export interface TimetableEvent {
   endTime: string;
   title: string;
   location: string;
+  /** Raw room value, empty when none is set. */
+  room: string;
   published: boolean;
   colorClassName: string;
 }
@@ -164,6 +166,7 @@ export function fromApiTimetableEntry(dto: TimetableEntryDTO): TimetableEvent {
     endTime: timeOf(dto.endTime),
     title: dto.class.course.code,
     location: dto.room ?? "Room TBC",
+    room: dto.room ?? "",
     published: dto.published,
     colorClassName: eventColor(dto.class.course.id),
   };
