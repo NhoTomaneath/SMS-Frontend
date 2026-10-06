@@ -33,11 +33,13 @@ export function BulkImportModal({ isOpen, onClose, onSuccess }: BulkImportProps)
     if (!file) return;
     setLoading(true); setError(null);
     try {
-      const text = await file.text();
-      if (!text.trim()) throw new Error("The selected CSV file is empty.");
+      if (!/\.(csv|xlsx)$/i.test(file.name)) throw new Error("Please select a .csv or .xlsx file.");
+      if (file.size === 0) throw new Error("The selected file is empty.");
+      const form = new FormData();
+      form.append("file", file);
       const res = await apiFetch<ImportStudentsResultDTO>("/student-affairs/students/import", {
         method: "POST",
-        body: { csv: text },
+        body: form,
       });
       if (res.data.failedCount > 0) {
         setError(`Imported ${res.data.createdCount} students, but ${res.data.failedCount} rows failed: ${res.data.errors[0]?.message}`);
@@ -46,7 +48,7 @@ export function BulkImportModal({ isOpen, onClose, onSuccess }: BulkImportProps)
         onClose();
       }
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "Failed to import CSV");
+      setError(err instanceof Error ? err.message : "Failed to import file");
     } finally {
       setLoading(false);
     }
@@ -61,11 +63,11 @@ export function BulkImportModal({ isOpen, onClose, onSuccess }: BulkImportProps)
         </div>
         {error && <p className="mt-3 text-xs text-rose-600 font-semibold">{error}</p>}
         <div className="mt-4 rounded-xl border-2 border-dashed p-6 text-center">
-          <input ref={fileRef} type="file" accept=".csv" className="hidden" onChange={(e) => { setFile(e.target.files?.[0] || null); setError(null); }} />
+          <input ref={fileRef} type="file" accept=".csv,.xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv" className="hidden" onChange={(e) => { setFile(e.target.files?.[0] || null); setError(null); }} />
           <UploadCloudIcon className="mx-auto h-7 w-7 text-stone-400" />
-          <p className="mt-2 text-xs font-semibold text-stone-700">{file ? file.name : "Select a CSV file"}</p>
+          <p className="mt-2 text-xs font-semibold text-stone-700">{file ? file.name : "Select a CSV or Excel (.xlsx) file"}</p>
           <div className="mt-2 flex items-center justify-center gap-3">
-            <button type="button" onClick={() => fileRef.current?.click()} className="text-xs font-bold text-rose-700 hover:underline">Browse CSV</button>
+            <button type="button" onClick={() => fileRef.current?.click()} className="text-xs font-bold text-rose-700 hover:underline">Browse File</button>
             <span className="text-stone-300">|</span>
             <button type="button" onClick={downloadTemplate} className="flex items-center gap-1 text-xs text-stone-600 hover:text-stone-900"><DownloadIcon className="h-3 w-3" /> Template</button>
           </div>
